@@ -102,8 +102,8 @@ class DropLinearTo(nn.Linear):
         self.to = to
 
     def forward(self, x):
-        residual = super(DropLinearTo, self).forward(x[:,self.to:])
-        return x[:, :self.to] + residual
+        #residual = super(DropLinearTo, self).forward(x[:,self.to:])
+        return x[:, :self.to] #+ residual
 
 
 class StackedACDC(nn.Module):
@@ -140,12 +140,13 @@ class StackedACDC(nn.Module):
             elif d_to < d:
                 layers.append(DropLinearTo(d, d_to))
             d = d_to
-            print(d)
             acdc = ACDC(d, d, groups=groups, bias=True)
             bn = nn.BatchNorm1d(d, affine=False)
             riffle = Riffle()
             relu = nn.ReLU()
             layers += [acdc, bn, riffle, relu]
+        # remove the last relu
+        _ = layers.pop(-1)
         layers.append(DropLinearTo(d, self.out_features))
         self.layers = nn.Sequential(*layers)
 

@@ -27,7 +27,27 @@ added a provision to group the input into powers of 2 before the DCT, so
 the DCT is always acting on a power of 2.
 
 To check it can learn something useful, ran it on MNIST, with the default
-settings for the PyTorch MNIST example:
+settings for the PyTorch MNIST example, using the following model
+definition:
+
+```
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.acdc = StackedACDC(784, 64, 12, groups=8)
+        self.fc2 = nn.Linear(64, 10)
+
+    def forward(self, x):
+        n, c, h, w = x.size()
+        x = x.view(n, c*h*w)
+        x = F.relu(self.acdc(x))
+        x = self.fc2(x)
+        return F.log_softmax(x, dim=1)
+```
+
+It maps down to the output dimensionality in the 12 steps. It was able to
+classify a bit, but it has a final linear layer, which can count for a lot
+in MNIST.
 
 ```
 Test set: Average loss: 0.1120, Accuracy: 9657/10000 (97%)
@@ -35,5 +55,25 @@ Test set: Average loss: 0.1120, Accuracy: 9657/10000 (97%)
 
 Then, after reading the right section of the paper I realised that the
 initialisation I was using was wrong, so I changed it to the recommendation
-of the paper, which is diagonal normal mean=1 sigma=10^-2.
+of the paper, which is diagonal normal mean=1 sigma=10^-2. Unfortunately,
+that trained a little worse:
 
+```
+Test set: Average loss: 0.3903, Accuracy: 9518/10000 (95%)
+```
+
+Training appears to be relatively slow. It's a few times slower than the
+ConvNet default that comes with the MNIST example. Also, there is *no
+regularisation* in this model and yet it does not overfit, which is not a
+good thing.
+
+Removing the final Linear layer, and deactivating those used when we drop
+dimensions, tried to train the resulting model on MNIST. I wouldn't expect
+it to work well necessarily, but it might work a bit. It barely worked:
+
+```
+Test set: Average loss: 1.6744, Accuracy: 5541/10000 (55%)
+```
+
+It doesn't seem like it is a very easy model component to optimise. That's
+partly what we might expect from Figure 3 in the paper.

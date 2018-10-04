@@ -173,3 +173,18 @@ def idct_3d(X, norm=None):
     x2 = idct(x1.transpose(-1, -2), norm=norm)
     x3 = idct(x2.transpose(-1, -3), norm=norm)
     return x3.transpose(-1, -3).transpose(-1, -2)
+
+if __name__ == '__main__':
+    import timeit
+    print("CPU Speed (100 executions):")
+    setup = "from __main__ import %s; import torch; x = torch.Tensor(1000,4096); x.normal_(0,1)"
+    for d in ["dct1", "dct", "idct"]:
+        print("  %s: "%d, timeit.timeit("_ = %s(x)"%d, setup=setup%d, number=100))
+    setup = "import torch; x = torch.Tensor(1000,4096);  model = %s; model = model.eval(); x.normal_(0,1)"
+    print("  Linear: ", timeit.timeit("_ = model(x)", setup=setup%"torch.nn.Linear(4096,4096)", number=100))   
+    print("GPU speed (100 executions):")
+    setup = "from __main__ import %s; import torch; x = torch.Tensor(1000,4096); x = x.to('cuda'); x.normal_(0,1)"
+    for d in ["dct1", "dct", "idct"]:
+        print("  %s: "%d, timeit.timeit("_ = %s(x)"%d, setup=setup%d, number=100))
+    setup = "import torch; x = torch.Tensor(1000,4096);  model = %s; model = model.to('cuda').eval(); x = x.to('cuda'); x.normal_(0,1)"
+    print("  Linear: ", timeit.timeit("_ = model(x)", setup=setup%"torch.nn.Linear(4096,4096)", number=100))   

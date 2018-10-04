@@ -97,3 +97,35 @@ ACDC:  0.529364119283855
 ```
 
 Must be an issue with the DCT implementation.
+
+Added speed test to the `_dct.py` file:
+
+```
+dct1:  0.01097189262509346
+dct:  0.2719538463279605
+idct:  0.1428453316912055
+Linear:  0.00483915489166975
+```
+
+So, on the GPU it's slower than a Linear layer every time. The forward DCT
+being the worst. Looking at the implementation there's a lot of wacky stuff
+going on around the calls to the actual FFT function, which could be
+causing the problems, especially given that stuff's not present in `dct1`,
+which is much faster (though still slower than Linear).
+
+On CPU, the DCTs are faster than a Linear layer, so it could be that the
+CUDA FFT is not optimized well (unlikely), or that something else is
+slowing it down:
+
+```
+CPU Speed (100 executions):
+  dct1:  1.1211627703160048
+  dct:  2.0362922428175807
+  idct:  3.8709053453058004
+  Linear:  4.468587472103536
+GPU speed (100 executions):
+  dct1:  0.010546403005719185
+  dct:  0.2743651457130909
+  idct:  0.14596352353692055
+  Linear:  0.004489514045417309
+```

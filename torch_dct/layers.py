@@ -169,3 +169,10 @@ if __name__ == '__main__':
     print(y.mean()) # tends to zero?
     print(torch.sqrt(y.var(1)).mean(0)) # doesn't tend to one? not good
     print(y.size())
+
+    # speed test
+    import timeit
+    setup = "from __main__ import ACDC; import torch; x = torch.Tensor(1000,4096);  model = %s; model = model.to('cuda').eval(); x = x.to('cuda'); x.normal_(0,1)"
+    print("Linear: ", timeit.timeit("_ = model(x)", setup=setup%"torch.nn.Linear(4096,4096)", number=100))
+    print("ACDC: ", timeit.timeit("_ = model(x)", setup=setup%"ACDC(4096,4096)", number=100))
+

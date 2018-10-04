@@ -77,3 +77,23 @@ Test set: Average loss: 1.6744, Accuracy: 5541/10000 (55%)
 
 It doesn't seem like it is a very easy model component to optimise. That's
 partly what we might expect from Figure 3 in the paper.
+
+Finally, I thought the execution speed seemed too slow even for the
+multiple layers. Added a line to the testing in `layers.py` to look at the
+execution time compared to a `Linear` layer. According to Figure 2 in the
+paper, the ACDC layer should be significantly faster with an input
+dimensionality of 4096. 100 loops with the packing and unpacking disabled:
+
+```
+Linear:  0.007770444266498089
+ACDC:  0.5301398802548647
+```
+
+Then with packing and unpacking enabled:
+
+```
+Linear:  0.005231818184256554
+ACDC:  0.529364119283855
+```
+
+Must be an issue with the DCT implementation.

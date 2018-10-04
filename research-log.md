@@ -129,3 +129,16 @@ GPU speed (100 executions):
   idct:  0.14596352353692055
   Linear:  0.004489514045417309
 ```
+
+To check if this is the same in tensorflow, ran the DCT that comes with
+tensorflow (running on GPU):
+
+```
+DCT:  0.6155939232558012
+Linear:  0.9840689264237881
+```
+
+This one is faster than the linear layer, but the linear layer is so much
+slower than the linear layer in PyTorch. I implemented it as just a matrix
+multiply with a random normal weight matrix.
+

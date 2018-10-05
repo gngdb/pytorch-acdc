@@ -142,3 +142,9 @@ This one is faster than the linear layer, but the linear layer is so much
 slower than the linear layer in PyTorch. I implemented it as just a matrix
 multiply with a random normal weight matrix.
 
+5th October 2018
+================
+
+Added a test of the linear problem from Section 6.1 of the paper. This
+implementation isn't able to get the loss below 1.0 after 1000 iterations,
+and the iterations themselves are extremely slow. 

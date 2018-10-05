@@ -148,3 +148,43 @@ multiply with a random normal weight matrix.
 Added a test of the linear problem from Section 6.1 of the paper. This
 implementation isn't able to get the loss below 1.0 after 1000 iterations,
 and the iterations themselves are extremely slow. 
+
+Trying to figure out why the DCT implementation is so much slower than a
+linear layer ended up messing around with the code for the DCT. The FFT on
+its own is actually faster than the linear layer (just) on the GPU and CPU,
+which is nice.
+
+Thought that it was the generation of `torch.arange` in every pass that
+would be increasing the time, so decided to cached that part, as we only
+have to know the size of the incoming X. Made a module, and called it
+`FasterDCT` to do this. Unfortunately, that didn't affect the speed at all.
+Found that the major factor affecting the speed was the `.flip(1)` on the
+array before the FFT.
+
+It turned out it was actually faster to use the form of the DCT by DFT
+where we just pad the input with zeros using the (relatively efficient) pad
+operations built into pytorch. Doing this and the result was slower on the
+CPU, but about 10 times faster on the GPU.
+
+Unfortunately, this is still slower than the Linear layer, so finally wrote
+an implementation that *is a linear layer*. It's just a linear layer where
+the weights are the DCT matrix. This seems to work fine. On the GPU, it's
+actually the same speed as the `rfft`:
+
+```
+CPU Speed (100 executions):
+  dct1:  1.0706987995654345
+  dct:  1.982983972877264
+  idct:  3.213463810272515
+  rfft:  0.631943185813725
+  FasterDCT:  3.719810419715941
+  Linear:  4.693692773580551
+GPU speed (100 executions):
+  dct1:  0.010924047790467739
+  dct:  0.27390200551599264
+  idct:  0.14248866774141788
+  rfft:  0.004178566858172417
+  FasterDCT:  0.030473709106445312
+  Linear:  0.006033767946064472
+  Dense DCT:  0.004221102222800255
+```

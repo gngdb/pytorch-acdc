@@ -3,7 +3,7 @@ import math
 
 import torch
 import torch.nn as nn
-import _dct as dct
+import torch_dct as dct
 
 class ACDC(nn.Module):
     """
@@ -147,7 +147,8 @@ class StackedACDC(nn.Module):
             layers += [acdc, bn, riffle, relu]
         # remove the last relu
         _ = layers.pop(-1)
-        layers.append(DropLinearTo(d, self.out_features))
+        if self.out_features < d:
+            layers.append(DropLinearTo(d, self.out_features))
         self.layers = nn.Sequential(*layers)
 
     def forward(self, x):

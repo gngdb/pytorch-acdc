@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-
+import torch.nn as nn
 
 def dct1(x):
     """
@@ -39,8 +39,7 @@ def dct(x, norm=None):
     :param norm: the normalization, None or 'ortho'
     :return: the DCT-II of the signal over the last dimension
     """
-    x_shape = x.shape
-    N = x_shape[-1]
+    B, N = x.shape
     x = x.contiguous().view(-1, N)
 
     v = torch.cat([x[:, ::2], x[:, 1::2].flip([1])], dim=1)
@@ -57,9 +56,46 @@ def dct(x, norm=None):
         V[:, 0] /= np.sqrt(N) * 2
         V[:, 1:] /= np.sqrt(N / 2) * 2
 
-    V = 2 * V.view(*x_shape)
+    V = 2 * V.view(B,N)
 
     return V
+
+
+class FasterDCT(nn.Module):
+    """Caches scaling variables for faster computation."""
+    def __init__(self, in_features):
+        super(FasterDCT, self).__init__()
+        N = in_features
+        k = - torch.arange(N, dtype=torch.float32)[None, :] * np.pi / (2 * N)
+        self.W_r = nn.Parameter(torch.cos(k))
+        self.W_i = nn.Parameter(torch.sin(k))
+        self.W_r.require_grad, self.W_i.require_grad = False, False
+        self.N = N
+        self.pad = nn.ConstantPad1d((0,N), 0.)
+        #self.reverse_idxs = torch.arange(N//2).flip(0)
+
+    def forward(self, x, norm=None):
+        B, N = x.shape
+        x = x.contiguous().view(-1, N)
+        v = self.pad(x)
+
+        #x = x.view(B, N//2, 2)
+        #x[:,:,1] = x[:,:,1].flip(1)
+        #v = x.contiguous().view(B, N)
+
+        #v = torch.cat([x[:,:,0], x[:,:,1].flip(1)], dim=1)
+
+        Vc = torch.rfft(v, 1, onesided=False)[:,:self.N]
+
+        V = Vc[:, :, 0] * self.W_r - Vc[:, :, 1] * self.W_i
+
+        if norm == 'ortho':
+            V[:, 0] /= np.sqrt(N) * 2
+            V[:, 1:] /= np.sqrt(N / 2) * 2
+
+        V = 2 * V.view(B,N)
+
+        return V
 
 
 def idct(X, norm=None):
@@ -174,17 +210,26 @@ def idct_3d(X, norm=None):
     x3 = idct(x2.transpose(-1, -3), norm=norm)
     return x3.transpose(-1, -3).transpose(-1, -2)
 
+def rfft(x):
+    return torch.rfft(x, 1, onesided=False)
+
 if __name__ == '__main__':
+
     import timeit
+
     print("CPU Speed (100 executions):")
     setup = "from __main__ import %s; import torch; x = torch.Tensor(1000,4096); x.normal_(0,1)"
-    for d in ["dct1", "dct", "idct"]:
+    for d in ["dct1", "dct", "idct", "rfft"]:
         print("  %s: "%d, timeit.timeit("_ = %s(x)"%d, setup=setup%d, number=100))
+    setup = "from __main__ import FasterDCT; import torch; x = torch.Tensor(1000,4096);  model = %s; model = model.eval(); x.normal_(0,1)"
+    print("  FasterDCT: ", timeit.timeit("_ = model(x)", setup=setup%"FasterDCT(4096)", number=100))   
     setup = "import torch; x = torch.Tensor(1000,4096);  model = %s; model = model.eval(); x.normal_(0,1)"
     print("  Linear: ", timeit.timeit("_ = model(x)", setup=setup%"torch.nn.Linear(4096,4096)", number=100))   
     print("GPU speed (100 executions):")
     setup = "from __main__ import %s; import torch; x = torch.Tensor(1000,4096); x = x.to('cuda'); x.normal_(0,1)"
-    for d in ["dct1", "dct", "idct"]:
+    for d in ["dct1", "dct", "idct", "rfft"]:
         print("  %s: "%d, timeit.timeit("_ = %s(x)"%d, setup=setup%d, number=100))
+    setup = "from __main__ import FasterDCT; import torch; x = torch.Tensor(1000,4096);  model = %s; model = model.to('cuda').eval(); x = x.to('cuda'); x.normal_(0,1)"
+    print("  FasterDCT: ", timeit.timeit("_ = model(x)", setup=setup%"FasterDCT(4096)", number=100))  
     setup = "import torch; x = torch.Tensor(1000,4096);  model = %s; model = model.to('cuda').eval(); x = x.to('cuda'); x.normal_(0,1)"
     print("  Linear: ", timeit.timeit("_ = model(x)", setup=setup%"torch.nn.Linear(4096,4096)", number=100))   

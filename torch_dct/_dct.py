@@ -213,10 +213,30 @@ def idct_3d(X, norm=None):
 def rfft(x):
     return torch.rfft(x, 1, onesided=False)
 
+
+class DumbDCT(nn.Linear):
+    """Implement any DCT as a linear layer."""
+    def __init__(self, in_features, type):
+        self.type = type
+        self.N = in_features
+        super(DumbDCT, self).__init__(in_features, in_features, bias=False)
+
+    def reset_parameters(self):
+        if self.type == 'dct':
+            # initialise using dct function
+            self.weight.data = dct(torch.eye(self.N)).data.t()
+        elif self.type == 'idct':
+            self.weight.data = idct(torch.eye(self.N)).data.t()
+        self.weight.require_grad = False # don't learn this!
+
+
 if __name__ == '__main__':
+    x = torch.Tensor(1000,4096)
+    x.normal_(0,1)
+    dumb_dct = DumbDCT(4096, 'dct')
+    assert torch.abs(dct(x) - dumb_dct(x)).mean() < 1e-3
 
     import timeit
-
     print("CPU Speed (100 executions):")
     setup = "from __main__ import %s; import torch; x = torch.Tensor(1000,4096); x.normal_(0,1)"
     for d in ["dct1", "dct", "idct", "rfft"]:
@@ -233,3 +253,5 @@ if __name__ == '__main__':
     print("  FasterDCT: ", timeit.timeit("_ = model(x)", setup=setup%"FasterDCT(4096)", number=100))  
     setup = "import torch; x = torch.Tensor(1000,4096);  model = %s; model = model.to('cuda').eval(); x = x.to('cuda'); x.normal_(0,1)"
     print("  Linear: ", timeit.timeit("_ = model(x)", setup=setup%"torch.nn.Linear(4096,4096)", number=100))   
+    setup = "from __main__ import DumbDCT; import torch; x = torch.Tensor(1000,4096);  model = %s; model = model.to('cuda').eval(); x = x.to('cuda'); x.normal_(0,1)"
+    print("  Dense DCT: ", timeit.timeit("_ = model(x)", setup=setup%"DumbDCT(4096, 'dct')", number=100))   

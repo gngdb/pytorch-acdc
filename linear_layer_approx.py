@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
-from torch_dct.layers import StackedACDC
+from torch_dct.layers import StackedLinearACDC
 
 from tqdm import tqdm
 
@@ -23,11 +23,17 @@ if __name__ == '__main__':
         Y = linear(X) + eps
 
     # 32 layers should be sufficient
-    acdc = StackedACDC(32,32,32)
+    acdc = StackedLinearACDC(32,32,32)
     acdc = acdc.train()
 
     # gradient optimiser
-    optimizer = optim.SGD(acdc.parameters(), lr=0.1, momentum=0.9)
+    optimizer = optim.Adam(acdc.parameters(), lr=0.001)
+
+    # use cuda
+    device = 'cuda'
+    acdc = acdc.to(device)
+    X = X.to(device)
+    Y = Y.to(device)
 
     # train this for a few thousand iterations
     N = 1000

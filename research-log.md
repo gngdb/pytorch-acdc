@@ -243,3 +243,9 @@ But, we really would like to know the effect of having more layers as well,
 so this will probably be something we have to graph. Hopefully then it will
 be clearer what is necessary to make the initialisation closer to standard
 initialisations, which is very important for optimisation.
+
+Tried a stacked version of this linear ACDC layer using a real permutation
+instead of the riffle shuffle we were using before and it was able to
+perform the linear layer approximation. Not sure how good the result is,
+but the final loss was `0.0198`.
+

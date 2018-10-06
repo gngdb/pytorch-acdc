@@ -56,11 +56,12 @@ class ACDC(nn.Module):
 class LinearACDC(nn.Linear):
     """Implement an ACDC layer in one matrix multiply (but more matrix
     operations for the parameterisation of the matrix)."""
-    def __init__(self, in_features, out_features):
+    def __init__(self, in_features, out_features, bias=False):
         assert in_features == out_features, "output size must equal input"
-        super(LinearACDC, self).__init__(in_features, out_features, bias=False)
+        super(LinearACDC, self).__init__(in_features, out_features, bias=bias)
 
     def reset_parameters(self):
+        super(LinearACDC, self).reset_parameters()
         # this is probably not a good way to do this
         if 'A' not in self.__dict__.keys():
             self.A = nn.Parameter(torch.Tensor(self.in_features, 1))
@@ -68,22 +69,20 @@ class LinearACDC(nn.Linear):
         self.A.data.normal_(1., 1e-2)
         self.D.data.normal_(1., 1e-2)
         # need to have DCT matrices stored for speed
+        # they have to be Parameters so they'll be 
         N = self.in_features
         self.dct = dct.dct(torch.eye(N))
         self.idct = dct.idct(torch.eye(N))
         # remove weight Parameter
         del self.weight
 
-    def to(self, device):
-        self.dct = self.dct.to(device)
-        self.idct = self.idct.to(device)
-        return super(LinearACDC, self).to(device)
-
     def forward(self, x):
+        self.dct = self.dct.to(self.A.device)
         AC = self.A*self.dct
+        self.idct = self.idct.to(self.D.device)
         DC = self.D*self.idct
         ACDC = torch.matmul(AC,DC)
-        self.weight = ACDC.t()
+        self.weight = ACDC.t() # monkey patch
         return super(LinearACDC, self).forward(x)
 
 
@@ -97,6 +96,23 @@ class Riffle(nn.Module):
         x = x.view(n, groups, 2).permute(0,2,1).contiguous()
         return x.view(n, d)
 
+class Permute(nn.Module):
+    """Assuming 2d input, permutes along last dimension using a fixed
+    permutation."""
+    def __init__(self, d):
+        self.d = d
+        super(Permute, self).__init__()
+        self.reset_parameters()
+        
+    def reset_parameters(self):
+        self.permute_idxs = torch.randperm(self.d)
+
+    def to(self, device):
+        self.permute_idxs.to(device)
+        super(Permute, self).to(device)
+
+    def forward(self, x):
+        return x[:,self.permute_idxs]
 
 class PackGroups(nn.Module):
     def __init__(self, groups):
@@ -183,6 +199,28 @@ class StackedACDC(nn.Module):
         #_ = layers.pop(-1)
         if self.out_features < d:
             layers.append(DropLinearTo(d, self.out_features))
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+class StackedLinearACDC(nn.Module):
+    def __init__(self, in_features, out_features, n_layers):
+        super(StackedLinearACDC, self).__init__()
+        self.in_features, self.out_features = in_features, out_features
+        assert in_features == out_features
+        self.n_layers = n_layers
+
+        layers = []
+        d = in_features
+        for n in range(n_layers):
+            acdc = LinearACDC(d, d, bias=True)
+            permute = Permute(d)
+            relu = nn.ReLU()
+            layers += [acdc, permute, relu]
+        # remove the last relu
+        _ = layers.pop(-1)
         self.layers = nn.Sequential(*layers)
 
     def forward(self, x):

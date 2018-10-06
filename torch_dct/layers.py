@@ -61,6 +61,7 @@ class LinearACDC(nn.Linear):
         super(LinearACDC, self).__init__(in_features, out_features, bias=False)
 
     def reset_parameters(self):
+        # this is probably not a good way to do this
         if 'A' not in self.__dict__.keys():
             self.A = nn.Parameter(torch.Tensor(self.in_features, 1))
             self.D = nn.Parameter(torch.Tensor(self.out_features, 1))
@@ -84,7 +85,7 @@ class LinearACDC(nn.Linear):
         ACDC = torch.matmul(AC,DC)
         self.weight = ACDC.t()
         return super(LinearACDC, self).forward(x)
-        
+
 
 class Riffle(nn.Module):
     def forward(self, x):
@@ -174,12 +175,12 @@ class StackedACDC(nn.Module):
                 layers.append(DropLinearTo(d, d_to))
             d = d_to
             acdc = ACDC(d, d, groups=groups, bias=True)
-            bn = nn.BatchNorm1d(d, affine=False)
+            #bn = nn.BatchNorm1d(d, affine=False)
             riffle = Riffle()
-            relu = nn.ReLU()
-            layers += [acdc, bn, riffle, relu]
+            #relu = nn.ReLU()
+            layers += [acdc, riffle]
         # remove the last relu
-        _ = layers.pop(-1)
+        #_ = layers.pop(-1)
         if self.out_features < d:
             layers.append(DropLinearTo(d, self.out_features))
         self.layers = nn.Sequential(*layers)

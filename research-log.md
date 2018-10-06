@@ -188,3 +188,58 @@ GPU speed (100 executions):
   Linear:  0.006033767946064472
   Dense DCT:  0.004221102222800255
 ```
+
+6th October 2018
+================
+
+Realised that if I'm implementing the DCT as a linear layer I can just
+parameterise the whole ACDC layer (and potentially the entire stack) as a
+single Linear layer as well, thanks to the associativity of matrix
+multiplication. We still have to multiply together the different
+components, but on a GPU this can be done in parallel, before the examples
+propagate to that layer. Also, since this uses simple Linear layers, it'll
+probably run much easier in this deep learning framework.
+
+Wrote an ACDC linear layer and validated the output. It matches the ACDC
+layer already written.
+
+Wrote a poorly named script `acdc.py` that passes an identity matrix
+through the stacked ACDC layer to estimate the effective weight matrix for
+multiple layers. Got these results with 16 layers, after removing the
+batchnorm and relus from the stacked implementation.
+
+```
+Input dim 4
+  Glorot stdv is 0.5
+  Effective W stdv 1.0834022760391235
+  Effective W mean 0.03615774214267731
+Input dim 8
+  Glorot stdv is 0.35355339059327373
+  Effective W stdv 0.6777600646018982
+  Effective W mean 0.20750541985034943
+Input dim 16
+  Glorot stdv is 0.25
+  Effective W stdv 0.6487581133842468
+  Effective W mean 0.08766232430934906
+Input dim 32
+  Glorot stdv is 0.17677669529663687
+  Effective W stdv 0.429548442363739
+  Effective W mean -0.01238858513534069
+Input dim 64
+  Glorot stdv is 0.125
+  Effective W stdv 0.3179543614387512
+  Effective W mean 0.044064365327358246
+Input dim 128
+  Glorot stdv is 0.08838834764831843
+  Effective W stdv 0.22509363293647766
+  Effective W mean 0.005937715992331505
+Input dim 256
+  Glorot stdv is 0.0625
+  Effective W stdv 0.1555483341217041
+  Effective W mean 0.0009372985805384815
+```
+
+But, we really would like to know the effect of having more layers as well,
+so this will probably be something we have to graph. Hopefully then it will
+be clearer what is necessary to make the initialisation closer to standard
+initialisations, which is very important for optimisation.

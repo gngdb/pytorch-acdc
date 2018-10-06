@@ -53,6 +53,39 @@ class ACDC(nn.Module):
             return x
 
 
+class LinearACDC(nn.Linear):
+    """Implement an ACDC layer in one matrix multiply (but more matrix
+    operations for the parameterisation of the matrix)."""
+    def __init__(self, in_features, out_features):
+        assert in_features == out_features, "output size must equal input"
+        super(LinearACDC, self).__init__(in_features, out_features, bias=False)
+
+    def reset_parameters(self):
+        if 'A' not in self.__dict__.keys():
+            self.A = nn.Parameter(torch.Tensor(self.in_features, 1))
+            self.D = nn.Parameter(torch.Tensor(self.out_features, 1))
+        self.A.data.normal_(1., 1e-2)
+        self.D.data.normal_(1., 1e-2)
+        # need to have DCT matrices stored for speed
+        N = self.in_features
+        self.dct = dct.dct(torch.eye(N))
+        self.idct = dct.idct(torch.eye(N))
+        # remove weight Parameter
+        del self.weight
+
+    def to(self, device):
+        self.dct = self.dct.to(device)
+        self.idct = self.idct.to(device)
+        return super(LinearACDC, self).to(device)
+
+    def forward(self, x):
+        AC = self.A*self.dct
+        DC = self.D*self.idct
+        ACDC = torch.matmul(AC,DC)
+        self.weight = ACDC.t()
+        return super(LinearACDC, self).forward(x)
+        
+
 class Riffle(nn.Module):
     def forward(self, x):
         # based on shufflenet shuffle
@@ -157,12 +190,22 @@ class StackedACDC(nn.Module):
 if __name__ == '__main__':
     x = torch.Tensor(128,200)
     x.normal_(0,1)
-    acdc = ACDC(200,200)
+    acdc = ACDC(200,200,bias=False)
     y = x
     for i in range(10):
         y = acdc(y)
     print(y.mean()) # tends to zero?
     print(torch.sqrt(y.var(1)).mean(0)) # doesn't tend to one? not good
+
+    # check sanity of LinearACDC
+    lin_acdc = LinearACDC(200,200)
+    lin_acdc.A.data.fill_(1.)
+    lin_acdc.D.data.fill_(1.)
+    acdc.A.data.fill_(1.)
+    acdc.D.data.fill_(1.)
+    error = torch.abs(acdc(x) - lin_acdc(x)).mean() 
+    print("LienarACDC error", error.item())
+    assert error < 1e-3
 
     acdc = StackedACDC(200,400,12, groups=4)
     y = x
@@ -173,7 +216,8 @@ if __name__ == '__main__':
 
     # speed test
     import timeit
-    setup = "from __main__ import ACDC; import torch; x = torch.Tensor(1000,4096);  model = %s; model = model.to('cuda').eval(); x = x.to('cuda'); x.normal_(0,1)"
-    print("Linear: ", timeit.timeit("_ = model(x)", setup=setup%"torch.nn.Linear(4096,4096)", number=100))
-    print("ACDC: ", timeit.timeit("_ = model(x)", setup=setup%"ACDC(4096,4096)", number=100))
+    setup = "from __main__ import ACDC,LinearACDC; import torch; x = torch.Tensor(1000,4096);  model = {0}(4096,4096); model = model.to('cuda').eval(); x = x.to('cuda'); x.normal_(0,1)"
+    print("Linear: ", timeit.timeit("_ = model(x)", setup=setup.format("torch.nn.Linear"), number=100))
+    print("ACDC: ", timeit.timeit("_ = model(x)", setup=setup.format("ACDC"), number=100))
+    print("Linear ACDC: ", timeit.timeit("_ = model(x)", setup=setup.format("LinearACDC"), number=100))
 

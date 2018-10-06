@@ -276,3 +276,7 @@ sizes of convolution.
 
 Unfortunately, there's no reason to expect that that might converge better,
 so it still isn't likely that it'll converge on CIFAR-10.
+
+As a final data point, with only a single ACDC layer instead of a stack,
+the ResNet18 overfits on CIFAR-10. Gets 90% on train, but only 85% on test
+after 50 epochs.

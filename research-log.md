@@ -249,3 +249,16 @@ instead of the riffle shuffle we were using before and it was able to
 perform the linear layer approximation. Not sure how good the result is,
 but the final loss was `0.0198`.
 
+I have also removed the batch norm and changed the optimiser for to Adam,
+so I thought it was also worth checking if the riffle shuffle would
+actually also work. Putting that in and the final loss after 1000
+iterations was `0.0208`, so about the same. It ran several times faster as
+well.
+
+Tried it out on MNIST and it optimises to 97% with *no fully connected
+layers*. I just flatten the image and propagate it through 32 ACDC layers,
+then throw away all but 10 dimensions of the output.
+
+```
+Test set: Average loss: 0.0952, Accuracy: 9741/10000 (97%)
+```

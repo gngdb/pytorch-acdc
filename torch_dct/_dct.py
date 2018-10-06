@@ -235,6 +235,8 @@ if __name__ == '__main__':
     x.normal_(0,1)
     dumb_dct = DumbDCT(4096, 'dct')
     assert torch.abs(dct(x) - dumb_dct(x)).mean() < 1e-3
+    dumb_idct = DumbDCT(4096, 'idct')
+    assert torch.abs(idct(x) - dumb_idct(x)).mean() < 1e-3
 
     import timeit
     print("CPU Speed (100 executions):")

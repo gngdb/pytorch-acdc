@@ -57,26 +57,32 @@ class LinearACDC(nn.Linear):
     """Implement an ACDC layer in one matrix multiply (but more matrix
     operations for the parameterisation of the matrix)."""
     def __init__(self, in_features, out_features, bias=False):
-        assert in_features == out_features, "output size must equal input"
+        #assert in_features == out_features, "output size must equal input"
+        assert out_features >= in_features, "%i must be greater than %i"%(out_features, in_features)
+        assert out_features%in_features == 0
+        self.expansion = out_features//in_features
         super(LinearACDC, self).__init__(in_features, out_features, bias=bias)
 
     def reset_parameters(self):
         super(LinearACDC, self).reset_parameters()
         # this is probably not a good way to do this
         if 'A' not in self.__dict__.keys():
-            self.A = nn.Parameter(torch.Tensor(self.in_features, 1))
+            self.A = nn.Parameter(torch.Tensor(self.out_features, 1))
             self.D = nn.Parameter(torch.Tensor(self.out_features, 1))
         self.A.data.normal_(1., 1e-2)
         self.D.data.normal_(1., 1e-2)
         # need to have DCT matrices stored for speed
         # they have to be Parameters so they'll be 
-        N = self.in_features
+        N = self.out_features
         self.dct = dct.dct(torch.eye(N))
         self.idct = dct.idct(torch.eye(N))
         # remove weight Parameter
         del self.weight
 
     def forward(self, x):
+        n, d = x.size()
+        if self.expansion > 1:
+            x = x.repeat(1, self.expansion)
         self.dct = self.dct.to(self.A.device)
         AC = self.A*self.dct
         self.idct = self.idct.to(self.D.device)
@@ -209,13 +215,14 @@ class StackedLinearACDC(nn.Module):
     def __init__(self, in_features, out_features, n_layers):
         super(StackedLinearACDC, self).__init__()
         self.in_features, self.out_features = in_features, out_features
-        assert in_features == out_features
+        assert out_features%in_features == 0
         self.n_layers = n_layers
 
         layers = []
         d = in_features
         for n in range(n_layers):
-            acdc = LinearACDC(d, d, bias=True)
+            acdc = LinearACDC(d, out_features, bias=True)
+            d = out_features
             permute = Riffle()
             relu = nn.ReLU()
             layers += [acdc, permute, relu]
@@ -225,6 +232,21 @@ class StackedLinearACDC(nn.Module):
 
     def forward(self, x):
         return self.layers(x)
+
+
+class Conv1x1ACDC(StackedLinearACDC):
+    def forward(self, x):
+        n, c, h, w = x.size()
+        x = x.contiguous()
+        x = x.view(n, c, h*w)
+        x = x.permute(0, 2, 1).contiguous()
+        x = x.view(n*h*w, c)
+        x = self.layers(x)
+        _, c = x.size()
+        x = x.view(n, h*w, c)
+        x = x.permute(0, 2, 1)
+        return x.view(n, c, h, w)
+
 
 if __name__ == '__main__':
     x = torch.Tensor(128,200)

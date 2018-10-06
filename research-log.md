@@ -262,3 +262,17 @@ then throw away all but 10 dimensions of the output.
 ```
 Test set: Average loss: 0.0952, Accuracy: 9741/10000 (97%)
 ```
+
+Replaced the 1 by 1 convolutions in a resnet18 and ran this on CIFAR-10.
+Unfortunately, it wasn't able to get more than 82% on the test set; 89% on
+the training set after around 40 epochs.
+
+The implementation of a 1 by 1 convolution I used is much slower than a
+real implementation. It involves rearranging the dimensions of the tensor
+to express it as a linear layer. The layer would be much faster if the
+weights for the 1 by 1 convolution were just replaced and then the forward
+prop worked the same way. Also, would provide an easy way to define other
+sizes of convolution.
+
+Unfortunately, there's no reason to expect that that might converge better,
+so it still isn't likely that it'll converge on CIFAR-10.

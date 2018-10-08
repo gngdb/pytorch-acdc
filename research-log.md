@@ -280,3 +280,13 @@ so it still isn't likely that it'll converge on CIFAR-10.
 As a final data point, with only a single ACDC layer instead of a stack,
 the ResNet18 overfits on CIFAR-10. Gets 90% on train, but only 85% on test
 after 50 epochs.
+
+8th October 2018
+================
+
+Investigated the statistics of the weight matrices more in a notebook.
+Found that the matrices learnt are not much like the random matrices we
+normally use. The mean is non-zero on the diagonal, close to 1, and the
+variance can be much greater than 1./sqrt(dim) - especially as the
+dimension grows. Full notebook is
+[here](https://gist.github.com/gngdb/82407cf7ab747a96e9a60eacbe1611cd).

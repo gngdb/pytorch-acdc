@@ -290,3 +290,28 @@ normally use. The mean is non-zero on the diagonal, close to 1, and the
 variance can be much greater than 1./sqrt(dim) - especially as the
 dimension grows. Full notebook is
 [here](https://gist.github.com/gngdb/82407cf7ab747a96e9a60eacbe1611cd).
+
+After making this notebook, I wondered if putting a riffle shuffle in
+between the forward and inverse DCT might help to get closer to a "better"
+initialisation. After doing this, the mean loses it's unit diagonal, and
+the standard deviation becomes much more uniform. 
+
+Here's an example mean:
+
+![](images/example_mean.png)
+
+And example standard deviation:
+
+![](images/example_sigma.png)
+
+While the standard deviation is a bit lower than "standard"
+initialisations, this is much closer to the properties we want in an
+initialisation.
+
+So, I ran the experiment on CIFAR-10 again. Before, neither training nor
+test would get above 90%. After, the model learns a lot more like the
+standard model: 99% on train, 92% on test after 70+ epochs.
+
+Of course, this doesn't mean that this actually works, because I've only
+replaced the 1 by 1 in shortcut connections, so only a few layers in the
+ResNet.

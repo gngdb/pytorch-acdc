@@ -1,53 +1,29 @@
-# DCT (Discrete Cosine Transform) for pytorch
 
-[![Build Status](https://travis-ci.com/zh217/torch-dct.svg?branch=master)](https://travis-ci.com/zh217/torch-dct)
-[![codecov](https://codecov.io/gh/zh217/torch-dct/branch/master/graph/badge.svg)](https://codecov.io/gh/zh217/torch-dct)
-[![PyPI version](https://img.shields.io/pypi/v/torch-dct.svg)](https://pypi.python.org/pypi/torch-dct/)
-[![PyPI version](https://img.shields.io/pypi/pyversions/torch-dct.svg)](https://pypi.python.org/pypi/torch-dct/)
-[![PyPI status](https://img.shields.io/pypi/status/torch-dct.svg)](https://pypi.python.org/pypi/torch-dct/)
-[![GitHub license](https://img.shields.io/github/license/zh217/torch-dct.svg)](https://github.com/zh217/torch-dct/blob/master/LICENSE)
+While this is a fork of [torch-dct](https://github.com/zh217/torch-dct),
+this repository was used to run a small investigation into whether [ACDC
+layers][acdc] can be used in convolutional layers.
 
+Initially, this was just because we saw that someone had implemented DCTs
+in PyTorch and thought that would make it relatively easy to try it out.
 
-This library implements DCT in terms of the built-in FFT operations in pytorch so that
-back propagation works through it, on both CPU and GPU. For more information on
-DCT and the algorithms used here, see 
-[Wikipedia](https://en.wikipedia.org/wiki/Discrete_cosine_transform) and the paper by
-[J. Makhoul](https://ieeexplore.ieee.org/document/1163351/). This
-[StackExchange article](https://dsp.stackexchange.com/questions/2807/fast-cosine-transform-via-fft)
-might also be helpful.
+Unfortunately, the answer seems to be that *no*, an ACDC layer doesn't make
+a good parameterisation for a convolutional layer. The network won't
+optimise as readily as it does with an unconstrained weight matrix.
 
-The following are currently implemented:
+Is there anything useful here?
+==============================
 
-* 1-D DCT-I and its inverse (which is a scaled DCT-I)
-* 1-D DCT-II and its inverse (which is a scaled DCT-III)
-* 2-D DCT-II and its inverse (which is a scaled DCT-III)
-* 3-D DCT-II and its inverse (which is a scaled DCT-III)
+There's some benchmarking of the speed of different DCT implementations in
+PyTorch. The fastest implementation on GPU was simply using the DCT matrix
+in a Linear layer. This was because the tensor manipulations in order to
+use Makhoul's method involving an FFT add much more time than the FFT
+itself. 
 
-## Install
+The ACDC implementations appear to be correct, stable and in line with what
+the paper describes, but we've only done a basic replication of section
+6.1 in the script [[./linear_layer_approx.py]].
 
-```
-pip install torch-dct
-```
+Full details of the investigation can be found in the [[research_log.md]].
 
-Requires `torch>=0.4.1` (lower versions are probably OK but I haven't tested them).
+[acdc]: https://arxiv.org/abs/1511.05946
 
-You can run test by getting the source and run `pytest`. To run the test you also
-need `scipy` installed.
-
-## Usage
-
-```python
-import numpy as np
-import torch
-import torch_dct as dct
-
-x = torch.tensor(np.random.normal(size=(1, 200)))
-X = dct.dct(x)   # DCT-II done through the last dimension
-y = dct.idct(X)  # scaled DCT-III done through the last dimension
-assert (torch.abs(x - y)).sum() < 1e-10  # x == y within numerical tolerance
-```
-
-`dct.dct1` and `dct.idct1` are for DCT-I and its inverse. The usage is the same.
-
-Just replace `dct` and `idct` by `dct_2d`, `dct_3d`, `idct_2d`, `idct_3d`, etc
-to get the multidimensional versions.

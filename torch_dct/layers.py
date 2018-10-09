@@ -29,6 +29,8 @@ class ACDC(nn.Module):
         self.groups = groups
         self.pack, self.unpack = PackGroups(groups), UnPackGroups(groups)
 
+        self.riffle = Riffle()
+
     def reset_parameters(self):
         # used in original code: https://github.com/mdenil/acdc-torch/blob/master/FastACDC.lua
         self.A.data.normal_(1., 1e-2)
@@ -45,6 +47,7 @@ class ACDC(nn.Module):
         x = self.unpack(x)
         x = self.D*x # second diagonal matrix
         x = self.pack(x)
+        x = self.riffle(x)
         x = dct.idct(x) # inverse DCT
         x = self.unpack(x)
         if self.bias is not None:
@@ -62,6 +65,7 @@ class LinearACDC(nn.Linear):
         assert out_features%in_features == 0
         self.expansion = out_features//in_features
         super(LinearACDC, self).__init__(in_features, out_features, bias=bias)
+        self.riffle = Riffle()
 
     def reset_parameters(self):
         super(LinearACDC, self).reset_parameters()
@@ -87,20 +91,80 @@ class LinearACDC(nn.Linear):
         AC = self.A*self.dct
         self.idct = self.idct.to(self.D.device)
         DC = self.D*self.idct
-        ACDC = torch.matmul(AC,DC)
+        ACDC = torch.matmul(self.riffle(AC),DC)
         self.weight = ACDC.t() # monkey patch
         return super(LinearACDC, self).forward(x)
+
+
+class ConvACDC(nn.Conv2d):
+    """Implements an ACDC convolutional layer by replacing the weights in a
+    convolutional layer with the effective weights of an ACDC layer. After
+    replacing the weights it operates precisely like a convolutional layer."""
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+            padding=0, dilation=1, groups=1, bias=True):
+        assert out_channels >= in_channels, "channels: %i must be greater than %i"%(out_channels, in_channels)
+        assert out_channels%in_channels == 0
+        assert bias == False # likely to accidentally set this and break things
+        self.expansion = out_channels//in_channels
+        super(ConvACDC, self).__init__(in_channels, out_channels, kernel_size,
+                stride=stride, padding=padding, dilation=dilation,
+                groups=groups, bias=bias)
+        self.riffle = Riffle()
+
+    def reset_parameters(self):
+        super(ConvACDC, self).reset_parameters()
+        # this is probably not a good way to do this
+        assert self.kernel_size[0] == self.kernel_size[1], "%s"%self.kernel_size
+        N = self.out_channels*self.kernel_size[0]
+        if 'A' not in self.__dict__.keys():
+            self.A = nn.Parameter(torch.Tensor(N, 1))
+            self.D = nn.Parameter(torch.Tensor(N, 1))
+        self.A.data.normal_(1., 1e-2)
+        self.D.data.normal_(1., 1e-2)
+        # initialise DCT matrices
+        self.dct = dct.dct(torch.eye(N))
+        self.idct = dct.idct(torch.eye(N))
+        # remove weight Parameter
+        del self.weight
+
+    def forward(self, x):
+        n, c_in, h, w = x.size()
+        k = self.kernel_size[0]
+        c_out = self.out_channels
+        if self.expansion > 1:
+            x = x.repeat(1, self.expansion, 1, 1)
+        # check our stored DCT matrices are on the right device
+        if self.dct.device != x.device:
+            self.dct = self.dct.to(x.device)
+            self.idct = self.idct.to(x.device)
+        # weight should be (c_out, c_out, k, k)
+        AC = self.A*self.dct
+        DC = self.D*self.idct
+        ACDC = torch.matmul(self.riffle(AC), DC) # size (c_out*k, c_out*k)
+        ACDC = ACDC.view(c_out*k**2, c_out) 
+        ACDC = ACDC.t().view(c_out, c_out, k, k) 
+        self.weight = ACDC
+        return super(ConvACDC, self).forward(x)
 
 
 class Riffle(nn.Module):
     def forward(self, x):
         # based on shufflenet shuffle
         # and https://en.wikipedia.org/wiki/Shuffling#Riffle
-        n, d = x.data.size()
-        assert d%2 == 0, "dim must be even, was %i"%d
-        groups = d//2
-        x = x.view(n, groups, 2).permute(0,2,1).contiguous()
-        return x.view(n, d)
+        dim = x.dim()
+        if dim == 2:
+            n, d = x.data.size()
+            assert d%2 == 0, "dim must be even, was %i"%d
+            groups = d//2
+            x = x.view(n, groups, 2).permute(0,2,1).contiguous()
+            return x.view(n, d)
+        elif dim == 4:
+            N,C,H,W = x.size()
+            g = 2
+            return x.view(N,g,C//g,H,W).permute(0,2,1,3,4).contiguous().view(N,C,H,W)
+        else:
+            raise ValueError("Shape of x not supported: %s"%x.size())
+
 
 class Permute(nn.Module):
     """Assuming 2d input, permutes along last dimension using a fixed
@@ -196,7 +260,7 @@ class StackedACDC(nn.Module):
             elif d_to < d:
                 layers.append(DropLinearTo(d, d_to))
             d = d_to
-            acdc = ACDC(d, d, groups=groups, bias=True)
+            acdc = ACDC(d, d, groups=groups, bias=False)
             #bn = nn.BatchNorm1d(d, affine=False)
             riffle = Riffle()
             #relu = nn.ReLU()
@@ -212,7 +276,7 @@ class StackedACDC(nn.Module):
 
 
 class StackedLinearACDC(nn.Module):
-    def __init__(self, in_features, out_features, n_layers):
+    def __init__(self, in_features, out_features, n_layers, base_layer=LinearACDC, bias=False):
         super(StackedLinearACDC, self).__init__()
         self.in_features, self.out_features = in_features, out_features
         assert out_features%in_features == 0
@@ -221,7 +285,7 @@ class StackedLinearACDC(nn.Module):
         layers = []
         d = in_features
         for n in range(n_layers):
-            acdc = LinearACDC(d, out_features, bias=True)
+            acdc = base_layer(d, out_features, bias=False if n < n_layers-1 else bias)
             d = out_features
             permute = Riffle()
             relu = nn.ReLU()
@@ -234,18 +298,11 @@ class StackedLinearACDC(nn.Module):
         return self.layers(x)
 
 
-class Conv1x1ACDC(StackedLinearACDC):
-    def forward(self, x):
-        n, c, h, w = x.size()
-        x = x.contiguous()
-        x = x.view(n, c, h*w)
-        x = x.permute(0, 2, 1).contiguous()
-        x = x.view(n*h*w, c)
-        x = self.layers(x)
-        _, c = x.size()
-        x = x.view(n, h*w, c)
-        x = x.permute(0, 2, 1)
-        return x.view(n, c, h, w)
+class StackedConvACDC(StackedLinearACDC):
+    def __init__(self, in_features, out_features, kernel_size, n_layers, bias=False):
+        def base_layer(in_channels, out_channels, bias):
+            return ConvACDC(in_channels, out_channels, kernel_size, bias=bias)
+        super(StackedConvACDC, self).__init__(in_features, out_features, n_layers, base_layer=base_layer, bias=False)
 
 
 if __name__ == '__main__':

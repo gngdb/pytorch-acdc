@@ -290,3 +290,22 @@ normally use. The mean is non-zero on the diagonal, close to 1, and the
 variance can be much greater than 1./sqrt(dim) - especially as the
 dimension grows. Full notebook is
 [here](https://gist.github.com/gngdb/82407cf7ab747a96e9a60eacbe1611cd).
+
+9th October 2018
+================
+
+Replaced most of the convolutions in a ResNet18 and tried to train on
+CIFAR-10 with the default settings. Used [kuangliu's repo as a
+base](su://github.com/kuangliu/pytorch-cifar). Unfortunately, even after 79
+epochs it hadn't cleared 70% on the test set. An unconstrained ResNet18
+would be getting about 91% on test at this point.
+
+```
+Epoch: 79
+ [============================ 391/391 ===========================>]  Step: 312ms | Tot: 2m41s | Loss: 0.473 | Acc: 83.334% (41667/50000 
+ [============================ 100/100 ===========================>]  Step: 126ms | Tot: 12s749ms | Loss: 0.985 | Acc: 69.810% (6981/100
+```
+
+It seems like training on constrained weight matrices is always going to be
+difficult, as you're playing with the optimization dynamics of neural
+networks, which are not well understood.

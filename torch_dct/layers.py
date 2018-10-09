@@ -276,7 +276,7 @@ class StackedACDC(nn.Module):
 
 
 class StackedLinearACDC(nn.Module):
-    def __init__(self, in_features, out_features, n_layers, base_layer=LinearACDC, bias=False):
+    def __init__(self, in_features, out_features, n_layers, bias=False):
         super(StackedLinearACDC, self).__init__()
         self.in_features, self.out_features = in_features, out_features
         assert out_features%in_features == 0
@@ -298,12 +298,30 @@ class StackedLinearACDC(nn.Module):
         return self.layers(x)
 
 
-class StackedConvACDC(StackedLinearACDC):
-    def __init__(self, in_features, out_features, kernel_size, n_layers, bias=False):
-        def base_layer(in_channels, out_channels, bias):
-            return ConvACDC(in_channels, out_channels, kernel_size, bias=bias)
-        super(StackedConvACDC, self).__init__(in_features, out_features, n_layers, base_layer=base_layer, bias=False)
+class StackedConvACDC(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, n_layers, stride=1,
+            padding=0, dilation=1, groups=1, bias=True):
+        super(StackedConvACDC, self).__init__()
+        self.in_channels, self.out_channels = in_channels, out_channels
+        assert out_channels%in_channels == 0
+        self.n_layers = n_layers
 
+        layers = []
+        d = in_channels
+        for n in range(n_layers):
+            acdc = ConvACDC(d, out_channels, kernel_size,
+                    stride=stride if n==0 else 1, padding=padding,
+                    dilation=dilation, groups=groups, bias=bias)
+            d = out_channels
+            permute = Riffle()
+            relu = nn.ReLU()
+            layers += [acdc, permute, relu]
+        # remove the last relu
+        _ = layers.pop(-1)
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layers(x)
 
 if __name__ == '__main__':
     x = torch.Tensor(128,200)

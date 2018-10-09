@@ -309,3 +309,18 @@ Epoch: 79
 It seems like training on constrained weight matrices is always going to be
 difficult, as you're playing with the optimization dynamics of neural
 networks, which are not well understood.
+
+As probably the last thing I'll do on this project, I implemented a stacked
+ACDC layer than combines all of the matrices used in a stacked ACDC layer
+before performing a convolution using that as weights. This should be
+faster, because in most cases the effective weight matrices are smaller
+than the batch size. The way it's implemented could be faster, I just call
+`reduce` to combine them, but the combination could be parallelised using
+`cat` and slicing. That's too much.
+
+It's about twice as fast on the test input, so not much better.
+
+```
+StackedConvACDC:  0.35135913360863924
+FastStackedConvACDC:  0.21031779795885086
+```

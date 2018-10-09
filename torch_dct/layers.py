@@ -1,5 +1,6 @@
 
 import math
+from functools import reduce
 
 import torch
 import torch.nn as nn
@@ -127,23 +128,27 @@ class ConvACDC(nn.Conv2d):
         # remove weight Parameter
         del self.weight
 
+    def acdc(self, device):
+        k = self.kernel_size[0]
+        c_out = self.out_channels
+        # check our stored DCT matrices are on the right device
+        if self.dct.device != device:
+            self.dct = self.dct.to(device)
+            self.idct = self.idct.to(device)
+        # weight should be (c_out, c_out, k, k)
+        AC = self.A*self.dct
+        DC = self.D*self.idct
+        return torch.matmul(self.riffle(AC), DC) # size (c_out*k, c_out*k)
+
     def forward(self, x):
         n, c_in, h, w = x.size()
         k = self.kernel_size[0]
         c_out = self.out_channels
         if self.expansion > 1:
             x = x.repeat(1, self.expansion, 1, 1)
-        # check our stored DCT matrices are on the right device
-        if self.dct.device != x.device:
-            self.dct = self.dct.to(x.device)
-            self.idct = self.idct.to(x.device)
-        # weight should be (c_out, c_out, k, k)
-        AC = self.A*self.dct
-        DC = self.D*self.idct
-        ACDC = torch.matmul(self.riffle(AC), DC) # size (c_out*k, c_out*k)
+        ACDC = self.acdc(x.device)
         ACDC = ACDC.view(c_out*k**2, c_out) 
-        ACDC = ACDC.t().view(c_out, c_out, k, k) 
-        self.weight = ACDC
+        self.weight = ACDC.t().view(c_out, c_out, k, k) 
         return super(ConvACDC, self).forward(x)
 
 
@@ -323,6 +328,49 @@ class StackedConvACDC(nn.Module):
     def forward(self, x):
         return self.layers(x)
 
+
+class FastStackedConvACDC(nn.Conv2d):
+    """A Stacked ACDC layer that just combines all of the weight marices of all
+    of the layers in the stack before implementing the layer with a
+    convolution. This means that there is no ReLUs in it, though, which may
+    hinder representational capacity."""
+    def __init__(self, in_channels, out_channels, kernel_size, n_layers, stride=1,
+            padding=0, dilation=1, groups=1, bias=True):
+        self.n_layers = n_layers
+        super(FastStackedConvACDC, self).__init__(in_channels, out_channels, kernel_size,
+                stride=stride, padding=padding, dilation=dilation,
+                groups=groups, bias=bias)
+
+        layers = []
+        d = in_channels
+        for n in range(n_layers):
+            acdc = ConvACDC(d, out_channels, kernel_size,
+                    stride=stride if n==0 else 1, padding=padding,
+                    dilation=dilation, groups=groups, bias=bias)
+            d = out_channels
+            layers += [acdc]
+        # remove the last relu
+        self.permute = Riffle()
+        _ = layers.pop(-1)
+        self.layers = nn.Sequential(*layers)
+
+    def reset_parameters(self):
+        del self.weight
+
+    def forward(self, x):
+        k = self.kernel_size[0]
+        c_out = self.out_channels
+        # gather ACDC matrices from each layer
+        acdcs = [layer.acdc(x.device) for layer in self.layers]
+        # riffle them all
+        acdcs = [self.permute(ACDC) for ACDC in acdcs]
+        # and combine them
+        ACDC = reduce(torch.matmul, acdcs)
+        ACDC = ACDC.view(c_out*k**2, c_out) 
+        self.weight = ACDC.t().view(c_out, c_out, k, k) 
+        return super(FastStackedConvACDC, self).forward(x)
+
+
 if __name__ == '__main__':
     x = torch.Tensor(128,200)
     x.normal_(0,1)
@@ -357,3 +405,6 @@ if __name__ == '__main__':
     print("ACDC: ", timeit.timeit("_ = model(x)", setup=setup.format("ACDC"), number=100))
     print("Linear ACDC: ", timeit.timeit("_ = model(x)", setup=setup.format("LinearACDC"), number=100))
 
+    setup = "from __main__ import StackedConvACDC,FastStackedConvACDC; import torch; x = torch.Tensor(100,256,4,4); model = {0}(256,256,1,12,bias=False); model=model.to('cuda').eval(); x = x.to('cuda'); x.normal_(0,1)"
+    print("StackedConvACDC: ", timeit.timeit("_ = model(x)", setup=setup.format("StackedConvACDC"), number=100))
+    print("FastStackedConvACDC: ", timeit.timeit("_ = model(x)", setup=setup.format("FastStackedConvACDC"), number=100))

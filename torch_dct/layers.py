@@ -340,14 +340,13 @@ class FastStackedConvACDC(nn.Conv2d):
         super(FastStackedConvACDC, self).__init__(in_channels, out_channels, kernel_size,
                 stride=stride, padding=padding, dilation=dilation,
                 groups=groups, bias=bias)
-
+        assert out_channels >= in_channels, f"{out_channels} {in_channels}"
+        self.expansion = out_channels//in_channels
         layers = []
-        d = in_channels
         for n in range(n_layers):
-            acdc = ConvACDC(d, out_channels, kernel_size,
+            acdc = ConvACDC(out_channels, out_channels, kernel_size,
                     stride=stride if n==0 else 1, padding=padding,
                     dilation=dilation, groups=groups, bias=bias)
-            d = out_channels
             layers += [acdc]
         # remove the last relu
         self.permute = Riffle()
@@ -358,6 +357,8 @@ class FastStackedConvACDC(nn.Conv2d):
         del self.weight
 
     def forward(self, x):
+        if self.expansion > 1:
+            x = x.repeat(1, self.expansion, 1, 1)
         k = self.kernel_size[0]
         c_out = self.out_channels
         # gather ACDC matrices from each layer

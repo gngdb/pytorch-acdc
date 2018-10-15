@@ -21,9 +21,9 @@ itself.
 
 The ACDC implementations appear to be correct, stable and in line with what
 the paper describes, but we've only done a basic replication of section
-6.1 in the script [[./linear_layer_approx.py]].
+6.1 in the [experiment script](./linear_layer_approx.py).
 
-Full details of the investigation can be found in the [[research_log.md]].
+Full details of the investigation can be found in the [research log](./research_log.md).
 
 [acdc]: https://arxiv.org/abs/1511.05946
 

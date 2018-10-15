@@ -349,3 +349,37 @@ It's about twice as fast on the test input, so not much better.
 StackedConvACDC:  0.35135913360863924
 FastStackedConvACDC:  0.21031779795885086
 ```
+
+12th October 2018
+=================
+
+Tried running a ResNet50 replacing all the convolutions with 12 layers of
+ACDC convolutions. Perhaps unsurprisingly, this maxes out the memory on the
+GPUs.
+
+13th October 2018
+=================
+
+To get an estimate what kind of performance we should expect of a network
+trained using an ACDC convolutional layer, wanted to take a closer look at
+exactly how many FLOPs and parameters are used by different networks. Using
+a script left over from the moonshine work (with some modifications):
+
+```
+Tiny ConvNet    FLOPS           params
+  Original:     1.83065E+07     8.96740E+04
+  ACDC:         2.18184E+05     9.03400E+03
+ResNet18        FLOPS           params
+  Original:     5.55423E+08     1.11740E+07
+  ACDC:         4.14427E+06     1.20650E+05
+WRN(40,2)       FLOPS           params
+  Original:     3.28304E+08     2.24355E+06
+  ACDC:         3.78971E+06     7.70180E+04
+```
+
+On every network the reduction in FLOPs is between 1 and 2 orders of
+magnitude. On the smallest network the reduction in parameters is only
+about 10 times, but for the others it's more. For a ResNet18, it only uses
+about 1/100 the parameters. So, it's hardly surprising that we aren't able
+to train it to the same accuracy after replacing the convolutions.
+

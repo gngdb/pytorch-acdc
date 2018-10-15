@@ -329,6 +329,28 @@ class StackedConvACDC(nn.Module):
         return self.layers(x)
 
 
+class ChannelCollapse(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(ChannelCollapse, self).__init__()
+        assert in_channels%out_channels == 0, \
+                f"{in_channels} not divisible by {out_channels}"
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+    def forward(self, x):
+        n, c, h, w = x.size()
+        f = self.in_channels//self.out_channels
+        x = x.view(n, c//f, f, h, w)
+        return x.sum(2)
+
+class ChannelExpand(nn.Module):
+    """Concatenate channels to expand by `c_to_add` channels."""
+    def __init__(self, c_to_add):
+        super(ChannelExpand, self).__init__()
+        self.c = c_to_add
+    def forward(self,x):
+        x_add = x[:,:self.c,:,:]
+        return torch.cat([x,x_add],1)
+
 class FastStackedConvACDC(nn.Conv2d):
     """A Stacked ACDC layer that just combines all of the weight marices of all
     of the layers in the stack before implementing the layer with a
@@ -340,11 +362,20 @@ class FastStackedConvACDC(nn.Conv2d):
         super(FastStackedConvACDC, self).__init__(in_channels, out_channels, kernel_size,
                 stride=stride, padding=padding, dilation=dilation,
                 groups=groups, bias=bias)
-        assert out_channels >= in_channels, f"{out_channels} {in_channels}"
+        if out_channels > in_channels:
+            add_channels = 0
+            while out_channels%(in_channels+add_channels) != 0:
+                add_channels += 1
+            self.expand_channels = ChannelExpand(add_channels)
+            self.in_channels += add_channels
+            in_channels = self.in_channels
+        else:
+            self.expand_channels = lambda x: x
         self.expansion = out_channels//in_channels
         layers = []
         for n in range(n_layers):
-            acdc = ConvACDC(out_channels, out_channels, kernel_size,
+            channels = max(out_channels, in_channels)
+            acdc = ConvACDC(channels, channels, kernel_size,
                     stride=stride if n==0 else 1, padding=padding,
                     dilation=dilation, groups=groups, bias=bias)
             layers += [acdc]
@@ -352,24 +383,29 @@ class FastStackedConvACDC(nn.Conv2d):
         self.permute = Riffle()
         _ = layers.pop(-1)
         self.layers = nn.Sequential(*layers)
+        if out_channels < in_channels:
+            self.collapse = ChannelCollapse(in_channels, out_channels)
+        else:
+            self.collapse = lambda x: x
 
     def reset_parameters(self):
         del self.weight
 
     def forward(self, x):
+        x = self.expand_channels(x)
         if self.expansion > 1:
             x = x.repeat(1, self.expansion, 1, 1)
         k = self.kernel_size[0]
-        c_out = self.out_channels
+        c = max(self.out_channels, self.in_channels)
         # gather ACDC matrices from each layer
         acdcs = [layer.acdc(x.device) for layer in self.layers]
         # riffle them all
         acdcs = [self.permute(ACDC) for ACDC in acdcs]
         # and combine them
         ACDC = reduce(torch.matmul, acdcs)
-        ACDC = ACDC.view(c_out*k**2, c_out) 
-        self.weight = ACDC.t().view(c_out, c_out, k, k) 
-        return super(FastStackedConvACDC, self).forward(x)
+        ACDC = ACDC.view(c*k**2, c) 
+        self.weight = ACDC.t().view(c, c, k, k) 
+        return self.collapse(super(FastStackedConvACDC, self).forward(x))
 
 
 if __name__ == '__main__':

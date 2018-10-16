@@ -365,6 +365,8 @@ trained using an ACDC convolutional layer, wanted to take a closer look at
 exactly how many FLOPs and parameters are used by different networks. Using
 a script left over from the moonshine work (with some modifications):
 
+**This is wrong, see below.**
+
 ```
 Tiny ConvNet    FLOPS           params
   Original:     1.83065E+07     8.96740E+04
@@ -404,3 +406,43 @@ Error@1 8.760 Error@5 0.260
 
 Full results and learning curves are illustrated in [this
 notebook](https://gist.github.com/gngdb/3dec734700895f0580cbc780abdd0e6c).
+
+**Error in above FLOP calculations**. Was not taking into account the
+number of times the ACDC layers would be applied in a convolutional ACDC
+layer. Fixing this, and I found that the Mult-Adds were *much* less
+competitive:
+
+```
+Tiny ConvNet   FLOPS          params
+  Original:    1.83065E+07    8.96740E+04
+  ACDC:        2.94185E+07    9.03400E+03
+ResNet18       FLOPS          params
+  Original:    5.55423E+08    1.11740E+07
+  ACDC:        2.31831E+08    1.20650E+05
+WRN(40,2)      FLOPS          params
+  Original:    3.28304E+08    2.24355E+06
+  ACDC:        2.43861E+08    7.70180E+04
+```
+
+Looking into it, it turns out in the early layers where the number of
+channels is small the effective dimensionality of the ACDC layer is not
+enough to make a sequence of 12 ACDC layers worthwhile.
+
+But, thinking about that, it's easy to tell where this is going to be the
+case, and in those cases where it would be faster to simply use the weight
+matrix parameterised (as we do at training time) in the test time
+implementation. Doing this, we get a much more reasonable result (although
+not quite so good as the false results above):
+
+```
+Tiny ConvNet    FLOPS        params
+  Original:    1.83065E+07    8.96740E+04
+  ACDC:        2.76143E+06    1.83400E+03
+ResNet18    FLOPS        params
+  Original:    5.55423E+08    1.11740E+07
+  ACDC:        2.26888E+07    2.59300E+04
+WRN(40,2)    FLOPS        params
+  Original:    3.28304E+08    2.24355E+06
+  ACDC:        2.46428E+07    2.32580E+04
+```
+

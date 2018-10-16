@@ -383,3 +383,24 @@ about 10 times, but for the others it's more. For a ResNet18, it only uses
 about 1/100 the parameters. So, it's hardly surprising that we aren't able
 to train it to the same accuracy after replacing the convolutions.
 
+16th October 2018
+=================
+
+Tried training a wide resnet using Moonshine, replacing all the
+convolutions with ACDC convolutions. Initially, this did not work at all.
+Training from scratch without a teacher network:
+
+```
+Error@1 34.660 Error@5 3.090
+```
+
+However, learning from an experiment running Hyperband over a tiny
+convolutional network, I found that changing the weight decay factor to
+`8.8e-6` made a huge difference:
+
+```
+Error@1 8.760 Error@5 0.260
+```
+
+Full results and learning curves are illustrated in [this
+notebook](https://gist.github.com/gngdb/3dec734700895f0580cbc780abdd0e6c).

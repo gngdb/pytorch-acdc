@@ -1,6 +1,6 @@
 
-While this is a fork of [torch-dct](https://github.com/zh217/torch-dct),
-this repository was used to run a small investigation into whether [ACDC
+Originally a fork of [torch-dct](https://github.com/zh217/torch-dct), this
+repository was used to run a small investigation into whether [ACDC
 layers][acdc] can be used in convolutional layers.
 
 Initially, this was just because we saw that someone had implemented DCTs

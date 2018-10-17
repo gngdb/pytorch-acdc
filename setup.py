@@ -1,22 +1,16 @@
 from setuptools import setup
 
 setup(
-    name='torch-dct',
-    version='0.1.5',
-    packages=['torch_dct'],
+    name='pytorch-acdc',
+    version='0.0.1',
+    packages=['pytorch_acdc'],
     platforms='any',
-    classifiers=[
-        'Development Status :: 4 - Beta',
-        'License :: OSI Approved :: Apache Software License',
-        'Programming Language :: Python :: 2',
-        'Programming Language :: Python :: 3'
-    ],
     install_requires=['torch>=0.4.1'],
-    url='https://github.com/zh217/torch-dct',
+    url='https://github.com/gngdb/pytorch-acdc',
     license='MIT',
-    author='Ziyang Hu',
-    author_email='hu.ziyang@cantab.net',
-    description='Discrete Cosine Transform (DCT) for pytorch',
+    author='Gavin Gray',
+    author_email='g.d.b.gray@ed.ac.uk',
+    description='ACDC linear and convolutional layers.',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown'
 )

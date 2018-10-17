@@ -6,10 +6,6 @@ layers][acdc] can be used in convolutional layers.
 Initially, this was just because we saw that someone had implemented DCTs
 in PyTorch and thought that would make it relatively easy to try it out.
 
-Unfortunately, the answer seems to be that *no*, an ACDC layer doesn't make
-a good parameterisation for a convolutional layer. The network won't
-optimise as readily as it does with an unconstrained weight matrix.
-
 Is there anything useful here?
 ==============================
 

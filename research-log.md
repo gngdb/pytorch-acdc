@@ -446,3 +446,58 @@ WRN(40,2)    FLOPS        params
   ACDC:        2.46428E+07    2.32580E+04
 ```
 
+17th October 2018
+=================
+
+For the paper, wanted to write about the MNIST and linear approximation
+results. So ran the MNIST experiment again with our parameterisation of the
+LinearACDC layer. After 10 epochs, both with and without the extra riffle
+shuffle, if the Adam optimizer is used it converges fine to 97%.
+
+Ah, just went back and read this research log, and it was only on CIFAR
+experiments that the initialisation really matters.
+
+18th October 2018
+=================
+
+Ran the experiment with moonshine again after editing the code to use the
+original ACDC parameterisation, without the extra riffle shuffle. The
+results are strange. Without attention transfer, ie training without a
+teacher on its own, the network converges to a very similar final loss:
+
+```
+Error@1 12.020 Error@5 0.410
+```
+
+*But*, when trying to distil from the student network, it fails to learn
+even that well:
+
+```
+Error@1 13.400 Error@5 0.760
+```
+
+The settings are all the same, as far as I know.
+
+When I made the change to using the extra riffle shuffle I was
+experimenting with ResNet18, trying to train it from scratch, and that was
+where I found it helped. These results are with WideResNets, so it could
+just be an architecture difference. It does suggest that there is some
+capacity difference between the two parameterisations. But, the fact that
+it trains the same when not using distillation is concerning.
+
+Looking at the learning curves:
+
+![](images/acdc_original.from_scratch.png)
+
+![](images/acdc_original.moonshine.png)
+
+Directly comparing the validation errors and losses to using the extra
+riffle shuffle, again we only see a difference when training with attention
+transfer:
+
+![](images/acdc_compare.from_scratch.png)
+
+![](images/acdc_compare.moonshine.png)
+
+Notebook generating these results can be found
+[here](https://gist.github.com/gngdb/723ff595209f2e76d5e3aea7a7a8e1e0).

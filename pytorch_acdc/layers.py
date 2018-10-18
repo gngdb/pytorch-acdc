@@ -4,7 +4,7 @@ from functools import reduce
 
 import torch
 import torch.nn as nn
-import torch_dct as dct
+import pytorch_acdc as dct
 
 class ACDC(nn.Module):
     """
@@ -60,13 +60,14 @@ class ACDC(nn.Module):
 class LinearACDC(nn.Linear):
     """Implement an ACDC layer in one matrix multiply (but more matrix
     operations for the parameterisation of the matrix)."""
-    def __init__(self, in_features, out_features, bias=False):
+    def __init__(self, in_features, out_features, bias=False, original=False):
         #assert in_features == out_features, "output size must equal input"
         assert out_features >= in_features, "%i must be greater than %i"%(out_features, in_features)
         assert out_features%in_features == 0
         self.expansion = out_features//in_features
         super(LinearACDC, self).__init__(in_features, out_features, bias=bias)
         self.riffle = Riffle()
+        self.original = original # whether to use original parameterisation
 
     def reset_parameters(self):
         super(LinearACDC, self).reset_parameters()
@@ -92,7 +93,10 @@ class LinearACDC(nn.Linear):
         AC = self.A*self.dct
         self.idct = self.idct.to(self.D.device)
         DC = self.D*self.idct
-        ACDC = torch.matmul(self.riffle(AC),DC)
+        if self.original:
+            ACDC = torch.matmul(AC,DC)
+        else:
+            ACDC = torch.matmul(self.riffle(AC),DC)
         self.weight = ACDC.t() # monkey patch
         return super(LinearACDC, self).forward(x)
 
@@ -102,7 +106,7 @@ class ConvACDC(nn.Conv2d):
     convolutional layer with the effective weights of an ACDC layer. After
     replacing the weights it operates precisely like a convolutional layer."""
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-            padding=0, dilation=1, groups=1, bias=True):
+            padding=0, dilation=1, groups=1, bias=False, original=True):
         assert out_channels >= in_channels, "channels: %i must be greater than %i"%(out_channels, in_channels)
         assert out_channels%in_channels == 0
         assert bias == False # likely to accidentally set this and break things
@@ -111,6 +115,7 @@ class ConvACDC(nn.Conv2d):
                 stride=stride, padding=padding, dilation=dilation,
                 groups=groups, bias=bias)
         self.riffle = Riffle()
+        self.original = original
 
     def reset_parameters(self):
         super(ConvACDC, self).reset_parameters()
@@ -138,7 +143,10 @@ class ConvACDC(nn.Conv2d):
         # weight should be (c_out, c_out, k, k)
         AC = self.A*self.dct
         DC = self.D*self.idct
-        return torch.matmul(self.riffle(AC), DC) # size (c_out*k, c_out*k)
+        if self.original:
+            return torch.matmul(AC, DC) # size (c_out*k, c_out*k)
+        else:
+            return torch.matmul(self.riffle(AC), DC) # size (c_out*k, c_out*k)
 
     def forward(self, x):
         n, c_in, h, w = x.size()
@@ -281,7 +289,8 @@ class StackedACDC(nn.Module):
 
 
 class StackedLinearACDC(nn.Module):
-    def __init__(self, in_features, out_features, n_layers, bias=False):
+    def __init__(self, in_features, out_features, n_layers, bias=False,
+            original=False):
         super(StackedLinearACDC, self).__init__()
         self.in_features, self.out_features = in_features, out_features
         assert out_features%in_features == 0
@@ -290,13 +299,14 @@ class StackedLinearACDC(nn.Module):
         layers = []
         d = in_features
         for n in range(n_layers):
-            acdc = base_layer(d, out_features, bias=False if n < n_layers-1 else bias)
+            acdc = LinearACDC(d, out_features,
+                    bias=False if n < n_layers-1 else bias, original=original)
             d = out_features
             permute = Riffle()
             relu = nn.ReLU()
-            layers += [acdc, permute, relu]
+            layers += [acdc, permute]
         # remove the last relu
-        _ = layers.pop(-1)
+        # _ = layers.pop(-1)
         self.layers = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -357,7 +367,7 @@ class FastStackedConvACDC(nn.Conv2d):
     convolution. This means that there is no ReLUs in it, though, which may
     hinder representational capacity."""
     def __init__(self, in_channels, out_channels, kernel_size, n_layers, stride=1,
-            padding=0, dilation=1, groups=1, bias=True):
+            padding=0, dilation=1, groups=1, bias=True, original=False):
         self.n_layers = n_layers
         super(FastStackedConvACDC, self).__init__(in_channels, out_channels, kernel_size,
                 stride=stride, padding=padding, dilation=dilation,
@@ -377,7 +387,8 @@ class FastStackedConvACDC(nn.Conv2d):
             channels = max(out_channels, in_channels)
             acdc = ConvACDC(channels, channels, kernel_size,
                     stride=stride if n==0 else 1, padding=padding,
-                    dilation=dilation, groups=groups, bias=bias)
+                    dilation=dilation, groups=groups, bias=bias,
+                    original=original)
             layers += [acdc]
         # remove the last relu
         self.permute = Riffle()
@@ -409,6 +420,19 @@ class FastStackedConvACDC(nn.Conv2d):
 
 
 if __name__ == '__main__':
+    # check ConvACDC
+    x = torch.Tensor(16,128,8,8)
+    x.normal_(0,1)
+    conv_acdc = ConvACDC(128,128,3)
+    assert not hasattr(conv_acdc, 'weight')
+    import ipdb
+    ipdb.set_trace()
+    param_names = [n for n,p in conv_acdc.named_parameters()]
+    assert 'weight' not in param_names, param_names
+    _ = conv_acdc(x)
+    param_names = [n for n,p in conv_acdc.named_parameters()]
+    assert 'weight' not in param_names, param_names
+
     x = torch.Tensor(128,200)
     x.normal_(0,1)
     acdc = ACDC(200,200,bias=False)
@@ -424,7 +448,7 @@ if __name__ == '__main__':
     lin_acdc.D.data.fill_(1.)
     acdc.A.data.fill_(1.)
     acdc.D.data.fill_(1.)
-    error = torch.abs(acdc(x) - lin_acdc(x)).mean() 
+    error = torch.abs(acdc(x) - lin_acdc(x)).max() 
     print("LienarACDC error", error.item())
     assert error < 1e-3
 

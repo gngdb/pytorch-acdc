@@ -102,7 +102,7 @@ class LinearACDC(nn.Linear):
 
 def kernel_matrix_to_weights(W, c_out, c_in, k):
     """Maps to 4D weight tensor from the kernel matrix used in im2col."""
-    W = W.view(c_out, c_in, k**2) 
+    assert k == 1 # yeah this function is quite pointless now
     return W.view(c_out, c_in, k, k)
 
 class ConvACDC(nn.Conv2d):
@@ -116,7 +116,13 @@ class ConvACDC(nn.Conv2d):
         assert bias == False # likely to accidentally set this and break things
         assert groups == 1       
         self.expansion = out_channels//in_channels
-        super(ConvACDC, self).__init__(out_channels, out_channels, 1, groups=1, bias=bias)
+        if kernel_size == 1:
+            super(ConvACDC, self).__init__(in_channels, out_channels,
+                    kernel_size, stride=stride, padding=padding,
+                    dilation=dilation, groups=groups, bias=bias)
+        elif kernel_size > 1:
+            super(ConvACDC, self).__init__(out_channels, out_channels, 1,
+                    groups=1, bias=bias)
         if kernel_size > 1:
             self.grouped = nn.Conv2d(in_channels, in_channels, kernel_size,
                     stride=stride, padding=padding, dilation=dilation,
@@ -377,11 +383,15 @@ class FastStackedConvACDC(nn.Conv2d):
     hinder representational capacity."""
     def __init__(self, in_channels, out_channels, kernel_size, n_layers, stride=1,
             padding=0, dilation=1, groups=1, bias=True, original=False):
-        n_layers = math.ceil(n_layers/(kernel_size**2))
         self.n_layers = n_layers
-        super(FastStackedConvACDC, self).__init__(in_channels, out_channels, kernel_size,
-                stride=stride, padding=padding, dilation=dilation,
-                groups=groups, bias=bias)
+        if kernel_size == 1:
+            super(FastStackedConvACDC, self).__init__(in_channels,
+                    out_channels, kernel_size, stride=stride, padding=padding,
+                    dilation=dilation, groups=groups, bias=bias)
+        elif kernel_size > 1:
+            assert groups == 1
+            super(FastStackedConvACDC, self).__init__(in_channels,
+                    out_channels, 1, bias=bias)
         if out_channels > in_channels:
             add_channels = 0
             while out_channels%(in_channels+add_channels) != 0:
@@ -392,25 +402,31 @@ class FastStackedConvACDC(nn.Conv2d):
         else:
             self.expand_channels = lambda x: x
         self.expansion = out_channels//in_channels
+        if kernel_size > 1:
+            self.grouped = nn.Conv2d(in_channels, in_channels, kernel_size,
+                    stride=stride, padding=padding, dilation=dilation,
+                    groups=in_channels, bias=False)
         layers = []
         for n in range(n_layers):
             channels = max(out_channels, in_channels)
-            acdc = ConvACDC(channels, channels, kernel_size,
-                    stride=stride if n==0 else 1, padding=padding,
-                    dilation=dilation, groups=groups, bias=bias,
+            acdc = ConvACDC(channels, channels, 1, bias=bias,
                     original=original)
             layers += [acdc]
         # remove the last relu
         self.permute = Riffle()
         _ = layers.pop(-1)
         self.layers = nn.Sequential(*layers)
-        in_channels = out_channels*kernel_size**2
-        self.collapse = ChannelContract(in_channels, out_channels)
+        if out_channels < in_channels:
+            self.collapse = ChannelCollapse(in_channels, out_channels)
+        else:
+            self.collapse = lambda x: x
 
     def reset_parameters(self):
         del self.weight
 
     def forward(self, x):
+        if hasattr(self, 'grouped'):
+            x = self.grouped(x)
         x = self.expand_channels(x)
         if self.expansion > 1:
             x = x.repeat(1, self.expansion, 1, 1)
@@ -422,8 +438,7 @@ class FastStackedConvACDC(nn.Conv2d):
         acdcs = [self.permute(ACDC) for ACDC in acdcs]
         # and combine them
         ACDC = reduce(torch.matmul, acdcs)
-        c_in, c_out = c, c*k**2
-        self.weight = kernel_matrix_to_weights(ACDC, c_out, c_in, k)
+        self.weight = kernel_matrix_to_weights(ACDC, c, c, k)
         return self.collapse(super(FastStackedConvACDC, self).forward(x))
 
 

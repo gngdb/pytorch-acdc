@@ -501,3 +501,68 @@ transfer:
 
 Notebook generating these results can be found
 [here](https://gist.github.com/gngdb/723ff595209f2e76d5e3aea7a7a8e1e0).
+
+While checking the kernel matrix parameterisation, I realised that what
+was currently implemented *could not* be implemented as a DCT, because the
+matrix is reshaped in the wrong way. So, what we have is still an effective
+low-rank matrix approximation, but our claims about efficient test time
+implementations are undermined.
+
+To fix this, it's more complicated than just reshaping a different way. I
+failed to realise before that because the kernel matrix *must be square*
+and the input dimensions *must be `c_in*k*k`*, then the number of output
+channels must be `c_out*k*k`. So, the matrices are very large. Luckily, we
+only scale with `n log(n)`.
+
+There's one way to deal with this problem. Almost all filters that are not
+1x1 are 3x3, so the scaling will be limited to a factor of 9. By
+coincidence, *we are already applying a larger scaling factor*, by stacking
+ACDC layers in groups of 12. So, we can just stack *fewer* layers, and
+collapse those that are remaining. That will control the growth in
+parameters, but in this case, we have issues with the memory expansion of
+that many channels in the activations before the contraction occurs, so we
+might end up having to use `checkpoint`s.
+
+19th October 2018
+=================
+
+After updating the code to fix the parameterisation problem described
+yesterday, ran the moonshine experiments again. Unfortunately, it didn't
+get the same promising results. None of the experiments were able to get
+past 90% accuracy.
+
+![](images/Oct18/acdc_compare.from_scratch.png)
+
+![](images/Oct18/acdc_compare.moonshine.png)
+
+In addition, the original ACDC parameterisation performed better than the
+parameterisation without the riffle shuffle.
+
+This is a bit strange, because the low-rank parameterisation *did work*, it
+just couldn't be implemented using DCTs at test time. So, we have a
+low-rank parameterisation that can be trained to quite good performance
+using attention transfer.
+
+It seems likely that the hack to reduce parameter growth when using massive
+kernel matrices (using less ACDC layers) is probably the culprit here.
+Given that, we need to go back to using square kernel matrices, but the
+only convolutions that can trivially have square kernel matrices are 1x1
+convolutions.
+
+One way we can make all convolutions in the network 1x1 is to make any that
+aren't 1x1 *separable* by preceding them with a 3x3 grouped convolution.
+Separable convolutions work well with full-rank matrices, so this seems
+like it might work well.
+
+Unfortunately, that would mean we aren't training networks constrained to
+be fully low-rank, unless the grouped convolutions were also made from ACDC
+layers, but that's going to take more development. To begin with, it's
+worth trying with full-rank 3x3 convolutions.
+
+Now running an experiment with full rank 3x3 grouped convolutions and
+another with low-rank 3x3 grouped convolutions.
+
+Preliminary result: full rank grouped convolutions and 1x1 ACDC layers
+works well; reaching the same 91.5% accuracy after 150 epochs. Having the
+extra riffle shuffle seems to be marginally better, but the difference may
+not be significant.

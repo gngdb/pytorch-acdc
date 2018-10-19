@@ -123,10 +123,9 @@ class ConvACDC(nn.Conv2d):
         elif kernel_size > 1:
             super(ConvACDC, self).__init__(out_channels, out_channels, 1,
                     groups=1, bias=bias)
-        if kernel_size > 1:
-            self.grouped = nn.Conv2d(in_channels, in_channels, kernel_size,
+            self.grouped = GroupedConvACDC(in_channels, in_channels, kernel_size,
                     stride=stride, padding=padding, dilation=dilation,
-                    groups=in_channels, bias=False)
+                    groups=in_channels, bias=False, original=original)
         self.riffle = Riffle()
         self.original = original
 
@@ -173,20 +172,89 @@ class ConvACDC(nn.Conv2d):
         return super(ConvACDC, self).forward(x)
 
 
+class GroupedConvACDC(nn.Conv2d):
+    """ACDC layer implementing grouped convolution; independent ACDC linear
+    layers act on each input channel, and are then collapsed into a single
+    output channel (although, this is contained in the weight
+    parameterisation)."""
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1,
+            padding=0, dilation=1, groups=1, bias=False, original=False):
+        assert out_channels == in_channels, "channels must be equal: %i =/= %i"%(out_channels, in_channels)
+        assert bias == False # likely to accidentally set this and break things
+        assert groups == in_channels
+        super(GroupedConvACDC, self).__init__(in_channels, out_channels,
+                kernel_size, stride=stride, padding=padding,
+                dilation=dilation, groups=groups, bias=bias)
+        self.original = original
+        self.riffle = Riffle(group_size=3)
+
+    def reset_parameters(self):
+        super(GroupedConvACDC, self).reset_parameters()
+        assert self.kernel_size[0] == self.kernel_size[1], "%s"%self.kernel_size
+        c = self.in_channels
+        N = self.kernel_size[0]**2
+        if 'A' not in self.__dict__.keys():
+            self.A = nn.Parameter(torch.Tensor(c, N, 1))
+            self.D = nn.Parameter(torch.Tensor(c, N, 1))
+        self.A.data.normal_(1., 1e-2)
+        self.D.data.normal_(1., 1e-2)
+        # initialise DCT matrices
+        self.dct = dct.dct(torch.eye(N))
+        self.idct = dct.idct(torch.eye(N))
+        # remove weight Parameter
+        del self.weight
+
+    def acdc(self, device):
+        k = self.kernel_size[0]
+        c = self.in_channels
+        # check our stored DCT matrices are on the right device
+        if self.dct.device != device:
+            self.dct = self.dct.to(device)
+            self.idct = self.idct.to(device)
+        # these multiplications cast, so o/p size (c, k**2, k**2)
+        AC = self.A*self.dct.unsqueeze(0)
+        DC = self.D*self.idct.unsqueeze(0)
+        # for 3D inputs torch.matmul is batched
+        if self.original:
+            ACDC = torch.matmul(AC, DC) 
+        else:
+            ACDC = torch.matmul(self.riffle(AC), DC)
+        ACDC = ACDC.sum(1) # (c, k**2)
+        return ACDC
+
+    def forward(self, x):
+        if hasattr(self, 'grouped'):
+            x = self.grouped(x)
+        n, c_in, h, w = x.size()
+        k = self.kernel_size[0]
+        ACDC = self.acdc(x.device)
+        self.weight = ACDC.view(c_in, 1, k, k)
+        return super(GroupedConvACDC, self).forward(x)
+
+
 class Riffle(nn.Module):
+    def __init__(self, group_size=2):
+        super(Riffle, self).__init__()
+        self.group_size = group_size
     def forward(self, x):
         # based on shufflenet shuffle
         # and https://en.wikipedia.org/wiki/Shuffling#Riffle
         dim = x.dim()
+        g = self.group_size
         if dim == 2:
             n, d = x.data.size()
-            assert d%2 == 0, "dim must be even, was %i"%d
-            groups = d//2
-            x = x.view(n, groups, 2).permute(0,2,1).contiguous()
+            assert d%g == 0, "dim must divide by %i, was %i"%(g,d)
+            groups = d//g
+            x = x.view(n, groups, g).permute(0,2,1).contiguous()
             return x.view(n, d)
+        elif dim == 3:
+            m, n, d = x.data.size()
+            assert d%g == 0, "dim must divide by %i, was %i"%(g,d)
+            groups = d//g
+            x = x.view(m, n, groups, g).permute(0,1,3,2).contiguous()
+            return x.view(m, n, d)
         elif dim == 4:
             N,C,H,W = x.size()
-            g = 2
             return x.view(N,g,C//g,H,W).permute(0,2,1,3,4).contiguous().view(N,C,H,W)
         else:
             raise ValueError("Shape of x not supported: %s"%x.size())
@@ -453,7 +521,6 @@ if __name__ == '__main__':
     _ = conv_acdc(x)
     param_names = [n for n,p in conv_acdc.named_parameters()]
     assert 'weight' not in param_names, param_names
-    assert False
 
     x = torch.Tensor(128,200)
     x.normal_(0,1)

@@ -100,20 +100,27 @@ class LinearACDC(nn.Linear):
         self.weight = ACDC.t() # monkey patch
         return super(LinearACDC, self).forward(x)
 
+def kernel_matrix_to_weights(W, c_out, c_in, k):
+    """Maps to 4D weight tensor from the kernel matrix used in im2col."""
+    W = W.view(c_out, c_in, k**2) 
+    return W.view(c_out, c_in, k, k)
 
 class ConvACDC(nn.Conv2d):
     """Implements an ACDC convolutional layer by replacing the weights in a
     convolutional layer with the effective weights of an ACDC layer. After
     replacing the weights it operates precisely like a convolutional layer."""
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-            padding=0, dilation=1, groups=1, bias=False, original=True):
+            padding=0, dilation=1, groups=1, bias=False, original=False):
         assert out_channels >= in_channels, "channels: %i must be greater than %i"%(out_channels, in_channels)
         assert out_channels%in_channels == 0
         assert bias == False # likely to accidentally set this and break things
+        assert groups == 1       
         self.expansion = out_channels//in_channels
-        super(ConvACDC, self).__init__(in_channels, out_channels, kernel_size,
-                stride=stride, padding=padding, dilation=dilation,
-                groups=groups, bias=bias)
+        super(ConvACDC, self).__init__(out_channels, out_channels, 1, groups=1, bias=bias)
+        if kernel_size > 1:
+            self.grouped = nn.Conv2d(in_channels, in_channels, kernel_size,
+                    stride=stride, padding=padding, dilation=dilation,
+                    groups=in_channels, bias=False)
         self.riffle = Riffle()
         self.original = original
 
@@ -121,7 +128,7 @@ class ConvACDC(nn.Conv2d):
         super(ConvACDC, self).reset_parameters()
         # this is probably not a good way to do this
         assert self.kernel_size[0] == self.kernel_size[1], "%s"%self.kernel_size
-        N = self.out_channels*self.kernel_size[0]
+        N = self.out_channels
         if 'A' not in self.__dict__.keys():
             self.A = nn.Parameter(torch.Tensor(N, 1))
             self.D = nn.Parameter(torch.Tensor(N, 1))
@@ -140,23 +147,23 @@ class ConvACDC(nn.Conv2d):
         if self.dct.device != device:
             self.dct = self.dct.to(device)
             self.idct = self.idct.to(device)
-        # weight should be (c_out, c_out, k, k)
         AC = self.A*self.dct
         DC = self.D*self.idct
         if self.original:
-            return torch.matmul(AC, DC) # size (c_out*k, c_out*k)
+            return torch.matmul(AC, DC) 
         else:
-            return torch.matmul(self.riffle(AC), DC) # size (c_out*k, c_out*k)
+            return torch.matmul(self.riffle(AC), DC)
 
     def forward(self, x):
+        if hasattr(self, 'grouped'):
+            x = self.grouped(x)
         n, c_in, h, w = x.size()
         k = self.kernel_size[0]
-        c_out = self.out_channels
+        c_in, c_out = self.in_channels, self.out_channels
         if self.expansion > 1:
             x = x.repeat(1, self.expansion, 1, 1)
         ACDC = self.acdc(x.device)
-        ACDC = ACDC.view(c_out*k**2, c_out) 
-        self.weight = ACDC.t().view(c_out, c_out, k, k) 
+        self.weight = kernel_matrix_to_weights(ACDC, c_out, c_in, k)
         return super(ConvACDC, self).forward(x)
 
 
@@ -339,9 +346,9 @@ class StackedConvACDC(nn.Module):
         return self.layers(x)
 
 
-class ChannelCollapse(nn.Module):
+class ChannelContract(nn.Module):
     def __init__(self, in_channels, out_channels):
-        super(ChannelCollapse, self).__init__()
+        super(ChannelContract, self).__init__()
         assert in_channels%out_channels == 0, \
                 f"{in_channels} not divisible by {out_channels}"
         self.in_channels = in_channels
@@ -352,6 +359,7 @@ class ChannelCollapse(nn.Module):
         x = x.view(n, c//f, f, h, w)
         return x.sum(2)
 
+
 class ChannelExpand(nn.Module):
     """Concatenate channels to expand by `c_to_add` channels."""
     def __init__(self, c_to_add):
@@ -361,6 +369,7 @@ class ChannelExpand(nn.Module):
         x_add = x[:,:self.c,:,:]
         return torch.cat([x,x_add],1)
 
+
 class FastStackedConvACDC(nn.Conv2d):
     """A Stacked ACDC layer that just combines all of the weight marices of all
     of the layers in the stack before implementing the layer with a
@@ -368,6 +377,7 @@ class FastStackedConvACDC(nn.Conv2d):
     hinder representational capacity."""
     def __init__(self, in_channels, out_channels, kernel_size, n_layers, stride=1,
             padding=0, dilation=1, groups=1, bias=True, original=False):
+        n_layers = math.ceil(n_layers/(kernel_size**2))
         self.n_layers = n_layers
         super(FastStackedConvACDC, self).__init__(in_channels, out_channels, kernel_size,
                 stride=stride, padding=padding, dilation=dilation,
@@ -394,10 +404,8 @@ class FastStackedConvACDC(nn.Conv2d):
         self.permute = Riffle()
         _ = layers.pop(-1)
         self.layers = nn.Sequential(*layers)
-        if out_channels < in_channels:
-            self.collapse = ChannelCollapse(in_channels, out_channels)
-        else:
-            self.collapse = lambda x: x
+        in_channels = out_channels*kernel_size**2
+        self.collapse = ChannelContract(in_channels, out_channels)
 
     def reset_parameters(self):
         del self.weight
@@ -414,8 +422,8 @@ class FastStackedConvACDC(nn.Conv2d):
         acdcs = [self.permute(ACDC) for ACDC in acdcs]
         # and combine them
         ACDC = reduce(torch.matmul, acdcs)
-        ACDC = ACDC.view(c*k**2, c) 
-        self.weight = ACDC.t().view(c, c, k, k) 
+        c_in, c_out = c, c*k**2
+        self.weight = kernel_matrix_to_weights(ACDC, c_out, c_in, k)
         return self.collapse(super(FastStackedConvACDC, self).forward(x))
 
 
@@ -425,13 +433,12 @@ if __name__ == '__main__':
     x.normal_(0,1)
     conv_acdc = ConvACDC(128,128,3)
     assert not hasattr(conv_acdc, 'weight')
-    import ipdb
-    ipdb.set_trace()
     param_names = [n for n,p in conv_acdc.named_parameters()]
     assert 'weight' not in param_names, param_names
     _ = conv_acdc(x)
     param_names = [n for n,p in conv_acdc.named_parameters()]
     assert 'weight' not in param_names, param_names
+    assert False
 
     x = torch.Tensor(128,200)
     x.normal_(0,1)

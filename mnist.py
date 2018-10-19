@@ -6,12 +6,12 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 
-from torch_dct.layers import StackedLinearACDC
+from pytorch_acdc.layers import StackedLinearACDC
 
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self, original):
         super(Net, self).__init__()
-        self.acdc = StackedLinearACDC(784, 784, 32)
+        self.acdc = StackedLinearACDC(784, 784, 32, original=original)
 
     def forward(self, x):
         n, c, h, w = x.size()
@@ -67,6 +67,8 @@ def main():
                         help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                         help='how many batches to wait before logging training status')
+    parser.add_argument('--original', action='store_true', default=False,
+                        help='uses original ACDC parameterisation')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -90,8 +92,9 @@ def main():
         batch_size=args.test_batch_size, shuffle=True, **kwargs)
 
 
-    model = Net().to(device)
-    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    model = Net(args.original).to(device)
+    #optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
 
     for epoch in range(1, args.epochs + 1):
         train(args, model, device, train_loader, optimizer, epoch)

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 
-from torch_dct.layers import StackedLinearACDC
+from pytorch_acdc.layers import StackedLinearACDC
 
 from tqdm import tqdm
 

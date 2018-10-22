@@ -192,7 +192,7 @@ class GroupedConvACDC(nn.Conv2d):
         super(GroupedConvACDC, self).reset_parameters()
         assert self.kernel_size[0] == self.kernel_size[1], "%s"%self.kernel_size
         c = self.in_channels
-        N = self.kernel_size[0]**2
+        N = self.kernel_size[0]
         if 'A' not in self.__dict__.keys():
             self.A = nn.Parameter(torch.Tensor(c, N, 1))
             self.D = nn.Parameter(torch.Tensor(c, N, 1))
@@ -211,7 +211,7 @@ class GroupedConvACDC(nn.Conv2d):
         if self.dct.device != device:
             self.dct = self.dct.to(device)
             self.idct = self.idct.to(device)
-        # these multiplications cast, so o/p size (c, k**2, k**2)
+        # these multiplications cast, so o/p size (c, k, k)
         AC = self.A*self.dct.unsqueeze(0)
         DC = self.D*self.idct.unsqueeze(0)
         # for 3D inputs torch.matmul is batched
@@ -219,7 +219,6 @@ class GroupedConvACDC(nn.Conv2d):
             ACDC = torch.matmul(AC, DC) 
         else:
             ACDC = torch.matmul(self.riffle(AC), DC)
-        ACDC = ACDC.sum(1) # (c, k**2)
         return ACDC
 
     def forward(self, x):
@@ -460,6 +459,11 @@ class FastStackedConvACDC(nn.Conv2d):
             assert groups == 1
             super(FastStackedConvACDC, self).__init__(in_channels,
                     out_channels, 1, bias=bias)
+            self.grouped = GroupedConvACDC(in_channels, in_channels,
+                    kernel_size, stride=stride, padding=padding,
+                    dilation=dilation, groups=in_channels, bias=False,
+                    original=original)
+
         if out_channels > in_channels:
             add_channels = 0
             while out_channels%(in_channels+add_channels) != 0:
@@ -470,10 +474,7 @@ class FastStackedConvACDC(nn.Conv2d):
         else:
             self.expand_channels = lambda x: x
         self.expansion = out_channels//in_channels
-        if kernel_size > 1:
-            self.grouped = nn.Conv2d(in_channels, in_channels, kernel_size,
-                    stride=stride, padding=padding, dilation=dilation,
-                    groups=in_channels, bias=False)
+
         layers = []
         for n in range(n_layers):
             channels = max(out_channels, in_channels)

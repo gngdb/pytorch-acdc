@@ -315,7 +315,7 @@ class StackedLinearACDC(nn.Module):
             acdc = LinearACDC(d, out_features,
                     bias=False if n < n_layers-1 else bias, original=original)
             d = out_features
-            permute = Riffle()
+            permute = Permute(d)
             relu = nn.ReLU()
             layers += [acdc, permute]
         # remove the last relu
@@ -392,6 +392,9 @@ class FastStackedConvACDC(nn.Conv2d):
             assert groups == 1
             super(FastStackedConvACDC, self).__init__(in_channels,
                     out_channels, 1, bias=bias)
+            self.grouped = nn.Conv2d(in_channels, in_channels, kernel_size,
+                    stride=stride, padding=padding, dilation=dilation,
+                    groups=in_channels, bias=False)
         if out_channels > in_channels:
             add_channels = 0
             while out_channels%(in_channels+add_channels) != 0:
@@ -402,10 +405,6 @@ class FastStackedConvACDC(nn.Conv2d):
         else:
             self.expand_channels = lambda x: x
         self.expansion = out_channels//in_channels
-        if kernel_size > 1:
-            self.grouped = nn.Conv2d(in_channels, in_channels, kernel_size,
-                    stride=stride, padding=padding, dilation=dilation,
-                    groups=in_channels, bias=False)
         layers = []
         for n in range(n_layers):
             channels = max(out_channels, in_channels)

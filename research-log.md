@@ -566,3 +566,58 @@ Preliminary result: full rank grouped convolutions and 1x1 ACDC layers
 works well; reaching the same 91.5% accuracy after 150 epochs. Having the
 extra riffle shuffle seems to be marginally better, but the difference may
 not be significant.
+
+22nd October 2018
+=================
+
+Paper about this is now submitted to the [CDNNRIA Workshop][cdnnria] at
+NIPS.
+
+Had to fix the parameter counts. A few layers were being ignored by the
+flaky recursive function. I didn't figure out exactly why that was
+happening. Instead I just rewrote it so I did understand what it was doing.
+
+Unfortunately, I then realised that there were a few convolutional layers
+remaining in the network not implemented using the ACDC parameterisation. I
+then replaced these and ran the experiment again, using only the original
+ACDC parameterisation.
+
+With full rank 3x3 convolutions, the parameter cost is then:
+
+```
+WRN(40,2)   FLOPS       params
+  Original: 3.28304E+08 2.24355E+06
+  ACDC:     3.32076E+07 4.64420E+04
+```
+
+Without, it is:
+
+```
+WRN(40,2)   FLOPS       params
+  Original: 3.28304E+08 2.24355E+06
+  ACDC:     3.32076E+07 3.87140E+04
+```
+
+So, as expected, not much different. The final performance was a little
+worse, consistent with what we'd seen before; approximating the first layer
+is generally bad. Top 1 test error:
+
+```
+             full rank 3x3         ACDC 3x3
+Scratch:     10.64%                13.46%
+Distilled:   10.13%                14.07%
+```
+
+Replacing the first convolution with a separable ACDC convolution appears
+to affect performance a lot. Strangely, meaning that the distillation
+doesn't even work. The 3x3 ACDC approximation doesn't save many parameters
+and costs quite a lot. Also, it seems like it's a bad idea to
+replace the first layer with anything compresed.
+
+More development needed to figure out how best to run a network with
+entirely a structured efficient transform; maybe slightly different network
+structures would work. What we're doing here, subsituting into an existing
+network, is just the easiest thing to do.
+
+[cdnnria]: https://openreview.net/group?id=NIPS.cc/2018/Workshop/CDNNRIA
+

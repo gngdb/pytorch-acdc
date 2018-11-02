@@ -166,3 +166,8 @@ fabric.properties
 # Editor-based Rest Client
 .idea/httpRequests
 
+# data directory
+data
+
+# IPython notebooks
+*.ipynb

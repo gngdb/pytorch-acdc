@@ -33,8 +33,8 @@ if __name__ == '__main__':
         def __init__(self):
             super(Objective, self).__init__()
             # 32 layers
-            #self.acdc = StackedLinearACDC(32,32,32)
-            self.acdc = nn.Linear(32,32)
+            self.acdc = StackedLinearACDC(32,32,32)
+            #self.acdc = nn.Linear(32,32)
             self.acdc = self.acdc.train()
             self.X, self.Y = X, Y
 
@@ -43,19 +43,19 @@ if __name__ == '__main__':
             return F.mse_loss(output, self.Y).mean()
 
     objective = Objective()
-
-    def verbose(xk):
-        print(xk)
-        import time
-        time.sleep(0.5)
-        return False
-
-    # try to optimize that function with scipy
-    obj = PyTorchObjective(objective)
-    xL = optimize.minimize(obj.fun, obj.x0, method='BFGS', jac=obj.jac, options={'gtol': 1e-6, 'disp': True})
-    #xL = optimize.minimize(obj.fun, obj.x0, method='CG', jac=obj.jac)# , options={'gtol': 1e-2})
-    from sklearn.linear_model import LinearRegression
-    linreg = LinearRegression()
-    linreg.fit(X,Y)
-    Y_hat = linreg.predict(X)
-    print("By least squares: ", np.square(Y_hat - Y).mean())
+    
+    maxiter = 100
+    with tqdm(total=maxiter) as pbar:
+        def verbose(xk):
+            pbar.update(1)
+        # try to optimize that function with scipy
+        obj = PyTorchObjective(objective)
+        xL = optimize.minimize(obj.fun, obj.x0, method='BFGS', jac=obj.jac,
+                callback=verbose, options={'gtol': 1e-6, 'disp': True,
+                    'maxiter':maxiter})
+        #xL = optimize.minimize(obj.fun, obj.x0, method='CG', jac=obj.jac)# , options={'gtol': 1e-2})
+        from sklearn.linear_model import LinearRegression
+        linreg = LinearRegression()
+        linreg.fit(X,Y)
+        Y_hat = linreg.predict(X)
+        print("By least squares: ", np.square(Y_hat - Y).mean())

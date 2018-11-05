@@ -621,3 +621,38 @@ network, is just the easiest thing to do.
 
 [cdnnria]: https://openreview.net/group?id=NIPS.cc/2018/Workshop/CDNNRIA
 
+5th November 2018
+=================
+
+Wrote a [wrapper for scipy's
+minimize](https://gist.github.com/gngdb/a9f912df362a85b37c730154ef3c294b).
+What I would like to do is characterise a set of layers for approximating
+random matrices, and compare them in terms of how well the approximation of
+a random matrix is, versus the number of parameters they use. To start
+with, here is the relationship between number of layers and the final error
+for a stacked ACDC layer.
+
+```
+2 layers:  0.029214851558208466
+4 layers:  0.029352974146604538
+8 layers:  0.027544179931282997
+16 layers:  0.024741271510720253
+32 layers:  0.02224716544151306
+```
+
+It would be interesting to compare this against:
+
+* ShuffleNet's grouped riffle shuffle computations.
+* AFDF layers
+* Block-diagonal ACDC layers
+* Block-diagonal AFDF layers
+
+Hopefully we'll see something interesting with the ability of fourier of
+cosine basis functions in approximating random matrices; ie that they
+should be better than just a shuffled sequence of block diagonal matrices.
+But, I don't know how far the fourier theory from the ACDC paper will take
+us here. Also, I don't know if this is a good metric to compare theses
+things: because what we care about is how well these layers will work when
+placed in a convolutional network, and the layers that depart more
+from the accepted norms are harder to trust.
+

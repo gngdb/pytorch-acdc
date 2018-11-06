@@ -1,7 +1,12 @@
+import json
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+
+from collections import OrderedDict
+from functools import reduce
 
 import numpy as np
 from scipy import optimize
@@ -12,47 +17,85 @@ from obj import PyTorchObjective
 
 from tqdm import tqdm
 
-if __name__ == '__main__':
+n_replicates = 10
+M, N = 32, 100
+
+def sample_experiment(M, N):
     # whatever this initialises to is our "true" W
-    linear = nn.Linear(32,32)
+    linear = nn.Linear(M,M)
     linear = linear.eval()
 
     # input X
-    N = 10000
-    X = torch.Tensor(N,32)
+    X = torch.Tensor(N,M)
     X.uniform_(0.,1.) # fill with uniform
-    eps = torch.Tensor(N,32)
+    eps = torch.Tensor(N,M)
     eps.normal_(0., 1e-4)
 
     # output Y
     with torch.no_grad():
         Y = linear(X) #+ eps
 
-    for i in range(1,6):
-        n_layers = 2**i
-        # make module executing the experiment
-        class Objective(nn.Module):
-            def __init__(self):
-                super(Objective, self).__init__()
-                # 32 layers
-                self.acdc = StackedLinearACDC(32,32,n_layers)
-                #self.acdc = nn.Linear(32,32)
-                self.acdc = self.acdc.train()
-                self.X, self.Y = X, Y
+    return X,Y
 
-            def forward(self):
-                output = self.acdc(self.X)
-                return F.mse_loss(output, self.Y).mean()
+def run_experiment(X,Y,objective):
+    maxiter = 1000
+    # try to optimize that function with scipy
+    obj = PyTorchObjective(objective)
+    # got more reliable results with CG than BFGS
+    #xL = optimize.minimize(obj.fun, obj.x0, method='BFGS', jac=obj.jac,
+    #        callback=verbose, options={'gtol': 1e-6, 'maxiter':maxiter})
+    xL = optimize.minimize(obj.fun, obj.x0, method='CG', jac=obj.jac, options={'maxiter':maxiter})
+    return xL.fun
 
-        objective = Objective()
-        
-        maxiter = 100
-        with tqdm(total=maxiter) as pbar:
-            def verbose(xk):
+def count_params(module):
+    n_params = 0
+    for p in module.parameters():
+        n_params += reduce(lambda x,y: x*y, p.size())
+    return n_params
+
+if __name__ == '__main__':
+    # open json storing results
+    results_file = 'linear_layer_approx_results.json'
+    if os.path.exists(results_file):
+        with open(results_file, 'r') as f:
+            results = json.load(f)
+    else:
+        results = OrderedDict()
+
+    # Results formatting: dictionary:
+    #   Key: string "<layer_type>_<options>"
+    #   Value: [(M, N, no. parameters, final MSE), ...]
+    # list contains replicates
+
+    with tqdm(total=6*n_replicates) as pbar:
+        # ACDC experiments
+        for i in range(6):
+            n_layers = 2**i
+            exp_str = 'ACDC_%i'%n_layers
+            pbar.set_description(exp_str)
+            if exp_str not in results.keys():
+                results[exp_str] = []
+            # make module executing the experiment
+            class Objective(nn.Module):
+                def __init__(self, X, Y):
+                    super(Objective, self).__init__()
+                    # M layers
+                    self.acdc = StackedLinearACDC(M,M,n_layers)
+                    #self.acdc = nn.Linear(M,M)
+                    self.acdc = self.acdc.train()
+                    self.X, self.Y = X, Y
+                def forward(self):
+                    output = self.acdc(self.X)
+                    return F.mse_loss(output, self.Y).mean()
+
+            # run experiment n_replicates times
+            for n in range(n_replicates):
+                X,Y = sample_experiment(M, N)
+                objective = Objective(X, Y)
+                mse = run_experiment(X,Y,objective) 
+                results[exp_str] += [(M, N, count_params(objective), mse)]
                 pbar.update(1)
-            # try to optimize that function with scipy
-            obj = PyTorchObjective(objective)
-            xL = optimize.minimize(obj.fun, obj.x0, method='BFGS', jac=obj.jac,
-                    callback=verbose, options={'gtol': 1e-6, 'maxiter':maxiter})
-            print("%i layers: "%n_layers, xL.fun)
-            #xL = optimize.minimize(obj.fun, obj.x0, method='CG', jac=obj.jac)# , options={'gtol': 1e-2})
+
+    # write results to file
+    with open(results_file, 'w') as f:
+        json.dump(results, f)

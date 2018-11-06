@@ -57,7 +57,7 @@ class PyTorchObjective(object):
             # compare x to cached_x to determine if we've been given a new input
             x, self.cached_x = np.array(x), np.array(self.cached_x)
             error = np.abs(x - self.cached_x)
-            return error.max() > 1e-8
+            return error.max() > 1e-4
 
     def cache(self, x):
         # unpack x and load into module 

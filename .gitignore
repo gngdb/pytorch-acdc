@@ -171,3 +171,6 @@ data
 
 # IPython notebooks
 *.ipynb
+
+# json files
+*.json

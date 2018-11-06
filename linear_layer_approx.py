@@ -13,7 +13,7 @@ import numpy as np
 from scipy import optimize
 
 from pytorch_acdc.layers import StackedLinearACDC
-from layers import ShuffleNetLinear
+from layers import ShuffleNetLinear, StackedAFDF
 
 from obj import PyTorchObjective
 
@@ -99,8 +99,9 @@ if __name__ == '__main__':
                 results[exp_str] += [(M, N, count_params(objective), mse)]
                 pbar.update(1)
 
-    plan = list(product([int(2**i) for i in range(2)],
-                        [int(2**i) for i in range(1,5)]))
+    #plan = list(product([int(2**i) for i in range(2)],
+    #                    [int(2**i) for i in range(1,5)]))
+    plan = []
     with tqdm(total=len(plan)*n_replicates) as pbar:
         # ShuffleNet experiments
         for n_layers, n_groups in plan:
@@ -128,6 +129,34 @@ if __name__ == '__main__':
                 mse = run_experiment(X,Y,objective) 
                 results[exp_str] += [(M, N, count_params(objective), mse)]
                 pbar.update(1)
+
+    with tqdm(total=6*n_replicates) as pbar:
+        # AFDF experiments
+        for i in range(6):
+            n_layers = 2**i
+            exp_str = 'AFDF_%i'%n_layers
+            pbar.set_description(exp_str)
+            if exp_str not in results.keys():
+                results[exp_str] = []
+            # make module executing the experiment
+            class Objective(nn.Module):
+                def __init__(self, X, Y):
+                    super(Objective, self).__init__()
+                    self.afdf = StackedAFDF(M,M,n_layers)
+                    self.afdf = self.afdf.train()
+                    self.X, self.Y = X, Y
+                def forward(self):
+                    output = self.afdf(self.X)
+                    return F.mse_loss(output, self.Y).mean()
+
+            # run experiment n_replicates times
+            for n in range(n_replicates):
+                X,Y = sample_experiment(M, N)
+                objective = Objective(X, Y)
+                mse = run_experiment(X,Y,objective) 
+                results[exp_str] += [(M, N, count_params(objective), mse)]
+                pbar.update(1)
+
 
     # write results to file
     with open(results_file, 'w') as f:

@@ -315,7 +315,7 @@ class StackedLinearACDC(nn.Module):
             acdc = LinearACDC(d, out_features,
                     bias=False if n < n_layers-1 else bias, original=original)
             d = out_features
-            permute = Permute(d)
+            permute = Riffle()
             relu = nn.ReLU()
             layers += [acdc, permute]
         # remove the last relu

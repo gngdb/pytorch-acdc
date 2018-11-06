@@ -656,3 +656,42 @@ things: because what we care about is how well these layers will work when
 placed in a convolutional network, and the layers that depart more
 from the accepted norms are harder to trust.
 
+6th November 2018
+=================
+
+Results with random permutations in the ACDC layers:
+
+```
+ACDC_1 with 64 parameters: 0.039945361018180844 +/- 0.005887363463677418
+ACDC_2 with 128 parameters: 0.02196877747774124 +/- 0.0013313392086725547
+ACDC_4 with 256 parameters: 0.016572200693190098 +/- 0.0012870614529237553
+ACDC_8 with 512 parameters: 0.012996809277683496 +/- 0.0012446588624042596
+ACDC_16 with 1024 parameters: 0.011954690515995025 +/- 0.0024686511387117167
+ACDC_32 with 2048 parameters: 0.009839443862438202 +/- 0.0015687459345148055
+```
+
+Results with riffle shuffles:
+
+```
+ACDC_1 with 64 parameters: 0.03738211020827294 +/- 0.0022882278375070462
+ACDC_2 with 128 parameters: 0.022296894714236258 +/- 0.0009171796806360699
+ACDC_4 with 256 parameters: 0.01644732430577278 +/- 0.0011384906728047184
+ACDC_8 with 512 parameters: 0.015047317650169135 +/- 0.002108139076455881
+ACDC_16 with 1024 parameters: 0.014236731920391321 +/- 0.0014999212816127136
+ACDC_32 with 2048 parameters: 0.01347635304555297 +/- 0.00204254258469781
+```
+
+With no shuffle at all:
+
+```
+ACDC_1 with 64 parameters: 0.042672832310199735 +/- 0.003499810547424213
+ACDC_2 with 128 parameters: 0.021928032301366328 +/- 0.0008551766909467213
+ACDC_4 with 256 parameters: 0.016392393223941325 +/- 0.0006724853495840596
+ACDC_8 with 512 parameters: 0.016679145488888027 +/- 0.001682481027513029
+ACDC_16 with 1024 parameters: 0.019225401058793067 +/- 0.001956640781136026
+ACDC_32 with 2048 parameters: 0.021551229804754258 +/- 0.0015830259807328492
+```
+
+Nice that we can see a difference including the shuffle, although it looks
+like the riffle shuffle might be a bigger problem than I originally
+thought, but maybe only for larger numbers of stacked ACDC layers.

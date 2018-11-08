@@ -5,7 +5,7 @@ from functools import reduce
 import torch
 import torch.nn as nn
 
-from pytorch_acdc.layers import Permute
+from pytorch_acdc.layers import Permute, BlockDiagonalACDC
 
 # courtesy of https://github.com/kuangliu/pytorch-cifar/models/shufflenet.py#L10-L19
 class ShuffleBlock(nn.Module):
@@ -61,6 +61,7 @@ class AFDF(nn.Module):
         f = self.D*f
         return torch.ifft(f, 1)
 
+
 class StackedAFDF(nn.Module):
     """Stack of AFDF layers, casting to complex and then taking the real
     component of the complex result."""
@@ -71,6 +72,81 @@ class StackedAFDF(nn.Module):
         layers = []
         for i in range(n_layers):
             afdf = AFDF(channels, channels)
+            permute = Permute(channels)
+            layers += [afdf, permute]
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        n, d = x.size()
+        x = x.view(n,d,1)
+        j = torch.zeros_like(x).to(x.device)
+        x = torch.cat([x,j],2)
+        x = self.layers(x)
+        return x[:,:,0] # only keep real component
+
+
+class GroupedStackedACDC(nn.Module):
+    """Stack of ACDC layers that also happen to use block diagonal weight
+    matrices."""
+    def __init__(self, in_channels, out_channels, n_layers, n_groups):
+        super(GroupedStackedACDC, self).__init__()
+        assert in_channels == out_channels
+        channels = in_channels
+        layers = []
+        for i in range(n_layers):
+            acdc = BlockDiagonalACDC(channels, channels, n_groups)
+            permute = Permute(channels)
+            layers += [acdc, permute]
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.layers(x)
+
+
+class ComplexGroupedLinear(nn.Module):
+    def __init__(self, in_dim, out_dim, groups, bias=False):
+        super(ComplexGroupedLinear, self).__init__()
+        assert bias == False, "bias not supported yet"
+        self.A = nn.Conv1d(in_dim, out_dim, 1, groups=groups, bias=bias) # real weights
+        self.B = nn.Conv1d(in_dim, out_dim, 1, groups=groups, bias=bias) # real weights
+
+    def forward(self, x):
+        n,d,c = x.size()
+        r = x[:,:,[0]] # real
+        j = x[:,:,[1]] # complex
+        Ar = self.A(r)
+        Bj = self.B(j)
+        Br = self.B(r)
+        Aj = self.A(j)
+        return torch.cat([Ar-Bj, Br+Aj], 2) # concat real and imaginary
+
+
+class BlockDiagonalAFDF(nn.Module):
+    # expects complex input and gives complex output
+    def __init__(self, in_channels, out_channels, groups):
+        super(BlockDiagonalAFDF, self).__init__()
+        assert in_channels == out_channels
+        c = in_channels
+        self.A = ComplexGroupedLinear(c, c, groups)
+        self.D = ComplexGroupedLinear(c, c, groups)
+
+    def forward(self, x):
+        x = self.A(x)
+        f = torch.fft(x, 1)
+        f = self.D(f)
+        return torch.ifft(f, 1)
+
+
+class GroupedStackedAFDF(nn.Module):
+    """Stack of AFDF layers that also happen to use block diagonal weight
+    matrices."""
+    def __init__(self, in_channels, out_channels, n_layers, n_groups):
+        super(GroupedStackedAFDF, self).__init__()
+        assert in_channels == out_channels
+        channels = in_channels
+        layers = []
+        for i in range(n_layers):
+            afdf = BlockDiagonalAFDF(channels, channels, n_groups)
             permute = Permute(channels)
             layers += [afdf, permute]
         self.layers = nn.Sequential(*layers)

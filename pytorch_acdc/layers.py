@@ -57,6 +57,43 @@ class ACDC(nn.Module):
             return x
 
 
+class BlockDiagonalACDC(nn.Module):
+    def __init__(self, in_features, out_features, groups=1, bias=True):
+        super(BlockDiagonalACDC, self).__init__()
+        self.in_features, self.out_features = in_features, out_features
+
+        self.groups = groups
+
+        assert in_features == out_features, "output size must equal input"
+        c = self.in_features
+        self.A = nn.Conv1d(c, c, 1, bias=False, groups=groups)
+        self.D = nn.Conv1d(c, c, 1, bias=False, groups=groups)
+        if bias:
+            self.bias = nn.Parameter(torch.Tensor(1,out_features))
+        else:
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+        self.riffle = Riffle()
+
+    def reset_parameters(self):
+        if self.bias is not None:
+            stdv = 1. / math.sqrt(self.out_features)
+            self.bias.data.uniform_(-stdv, stdv)
+
+    def forward(self, x):
+        n, d = x.size()
+        x = self.A(x.view(n,d,1)) # first block diagonal matrix
+        x = dct.dct(x.view(n,d)) # forward DCT
+        x = self.D(x.view(n,d,1)) # second block diagonal matrix
+        x = dct.idct(x.view(n,d)) # inverse DCT
+        x = self.riffle(x)
+        if self.bias is not None:
+            return x + self.bias
+        else:
+            return x
+
+
 class LinearACDC(nn.Linear):
     """Implement an ACDC layer in one matrix multiply (but more matrix
     operations for the parameterisation of the matrix)."""

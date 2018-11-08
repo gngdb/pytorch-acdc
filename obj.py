@@ -22,7 +22,7 @@ class PyTorchObjective(object):
         parameters = OrderedDict(obj_module.named_parameters())
         self.param_shapes = {n:parameters[n].size() for n in parameters}
         # ravel and concatenate all parameters to make x0
-        self.x0 = np.concatenate([parameters[n].data.numpy().ravel() 
+        self.x0 = np.concatenate([parameters[n].data.cpu().numpy().ravel() 
                                    for n in parameters])
 
     def unpack_parameters(self, x):
@@ -45,7 +45,7 @@ class PyTorchObjective(object):
         numpy array."""
         grads = []
         for p in self.f.parameters():
-            grad = p.grad.data.numpy()
+            grad = p.grad.data.cpu().numpy()
             grads.append(grad.ravel())
         return np.concatenate(grads)
 

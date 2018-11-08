@@ -695,3 +695,53 @@ ACDC_32 with 2048 parameters: 0.021551229804754258 +/- 0.0015830259807328492
 Nice that we can see a difference including the shuffle, although it looks
 like the riffle shuffle might be a bigger problem than I originally
 thought, but maybe only for larger numbers of stacked ACDC layers.
+
+And, on this small-dimensional problem, these results are comparing well to
+the following using ShuffleNet-style linear transforms:
+
+```
+ShuffleNet_1_2 with 544 parameters: 0.011396392062306405 +/- 0.0005741605134364651
+ShuffleNet_1_4 with 288 parameters: 0.01899416036903858 +/- 0.0006222816695907676
+ShuffleNet_1_8 with 160 parameters: 0.023209663294255733 +/- 0.0006908976389915552
+ShuffleNet_1_16 with 96 parameters: 0.025367015972733498 +/- 0.0010036517037232474
+ShuffleNet_2_2 with 1056 parameters: 0.0023452310473658145 +/- 0.00021441121269659421
+ShuffleNet_2_4 with 544 parameters: 0.00892017288133502 +/- 0.0005600427061291132
+ShuffleNet_2_8 with 288 parameters: 0.016848766896873712 +/- 0.0006582309055104109
+ShuffleNet_2_16 with 160 parameters: 0.02379257958382368 +/- 0.0005456462720799966
+```
+
+Maybe our ability to fit models using sequences of AFDF layers breaks down
+at some point?
+
+```
+AFDF_1 with 128 parameters: 0.03980481568723917 +/- 0.003984102545410581
+AFDF_2 with 256 parameters: 0.01655638525262475 +/- 0.0010449098074118547
+AFDF_4 with 512 parameters: 0.012067265249788761 +/- 0.0026702099380318096
+AFDF_8 with 1024 parameters: 0.015203381888568401 +/- 0.004112131461569261
+AFDF_16 with 2048 parameters: 0.020533626712858678 +/- 0.0032220299875666486
+AFDF_32 with 4096 parameters: 0.019189960323274136 +/- 0.0031443711230626837
+```
+
+There could be problems with the block diagonal parameterisation, because
+we haven't looked at whether the default initialisation for a grouped
+convolution is going to be OK in this application.
+
+```
+BDACDC_1_32 with 96 parameters: 0.02391790524125099 +/- 0.0012070046625928183
+BDACDC_1_16 with 160 parameters: 0.020100351050496103 +/- 0.0006455927827586273
+BDACDC_2_32 with 192 parameters: 0.027115100622177125 +/- 0.0012902570825444987
+BDACDC_2_16 with 320 parameters: 0.02770044282078743 +/- 0.0010318889161682182
+```
+
+8th November 2018
+=================
+
+Took ages to fit the block diagonal AFDF layer, even after enabling the
+GPU:
+
+```
+BDAFDF_1_32 with 128 parameters: 0.02510499581694603 +/- 0.0023418114179276886
+BDAFDF_1_16 with 256 parameters: 0.01609013359993696 +/- 0.0005767606972753613
+BDAFDF_2_32 with 256 parameters: 0.10552336601540446 +/- 0.03741079991821692
+BDAFDF_2_16 with 512 parameters: 0.005766414804384112 +/- 0.0008107623888132473
+```

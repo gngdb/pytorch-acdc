@@ -745,3 +745,69 @@ BDAFDF_1_16 with 256 parameters: 0.01609013359993696 +/- 0.0005767606972753613
 BDAFDF_2_32 with 256 parameters: 0.10552336601540446 +/- 0.03741079991821692
 BDAFDF_2_16 with 512 parameters: 0.005766414804384112 +/- 0.0008107623888132473
 ```
+
+When running this experiment, am seeing it converge to the same MSE
+regardless of which technique is used. Suspect it's something to do with
+the number of examples being optimised over, so increasing that. Also,
+increased dimensionality to 64. Example of this problem:
+
+```
+ACDC_1 with 128 parameters: 0.04342527911067009 +/- 0.0032180048761847983
+ACDC_2 with 256 parameters: 0.030606068298220636 +/- 0.0019950313822522346
+ACDC_4 with 512 parameters: 0.029660494066774845 +/- 0.0010253296901685974
+ACDC_8 with 1024 parameters: 0.028287493996322154 +/- 0.0008926166300934539
+ACDC_16 with 2048 parameters: 0.028630413487553595 +/- 0.0007667899956134985
+ACDC_32 with 4096 parameters: 0.028485263139009474 +/- 0.0005720382728296163
+ShuffleNet_1_64 with 128 parameters: 0.028141547180712222 +/- 0.0004525815503431816
+ShuffleNet_1_32 with 192 parameters: 0.029686209745705128 +/- 0.0005337902003253972
+ShuffleNet_1_16 with 320 parameters: 0.030479111522436143 +/- 0.0006247823584944368
+ShuffleNet_1_8 with 576 parameters: 0.03169378656893969 +/- 0.000771356750948077
+ShuffleNet_2_64 with 192 parameters: 0.028093631938099863 +/- 0.000386225427504883
+ShuffleNet_2_32 with 320 parameters: 0.027812463976442815 +/- 0.0004479525364091455
+ShuffleNet_2_16 with 576 parameters: 0.02784652579575777 +/- 0.0004010625743035077
+ShuffleNet_2_8 with 1088 parameters: 0.02782885227352381 +/- 0.00040341685137479063
+AFDF_1 with 256 parameters: 0.04272959753870964 +/- 0.0016259285338998787
+AFDF_2 with 512 parameters: 0.032606665045022964 +/- 0.00225821883216731
+AFDF_4 with 1024 parameters: 0.02947993911802769 +/- 0.001343538874680454
+AFDF_8 with 2048 parameters: 0.029274813644587994 +/- 0.0014635147233242013
+AFDF_16 with 4096 parameters: 0.029484680481255056 +/- 0.001507109038145295
+AFDF_32 with 8192 parameters: 0.02903442718088627 +/- 0.001218475544194758
+BDACDC_1_64 with 192 parameters: 0.027915137261152266 +/- 0.0002816616064455024
+BDACDC_1_32 with 320 parameters: 0.02780665010213852 +/- 0.0003566181894079184
+BDACDC_1_16 with 576 parameters: 0.02789516244083643 +/- 0.0005526298316782186
+BDACDC_1_8 with 1088 parameters: 0.027873755618929862 +/- 0.0003564326576096119
+BDACDC_2_64 with 384 parameters: 0.028003584966063498 +/- 0.0004749012663952531
+BDACDC_2_32 with 640 parameters: 0.027827861346304418 +/- 0.00038511648495479037
+BDACDC_2_16 with 1152 parameters: 0.027976127155125142 +/- 0.0004441786977739205
+BDACDC_2_8 with 2176 parameters: 0.027731291204690933 +/- 0.00045487549798509195
+BDAFDF_1_64 with 256 parameters: 0.04369620494544506 +/- 0.019824162275829112
+BDAFDF_1_32 with 512 parameters: 0.030706470459699632 +/- 0.00203823519666471
+BDAFDF_1_16 with 1024 parameters: 0.02937733642756939 +/- 0.0014421606125198396
+BDAFDF_1_8 with 2048 parameters: 0.029040983505547048 +/- 0.000756705617439621
+BDAFDF_2_64 with 512 parameters: 0.11284870952367783 +/- 0.018291394651008656
+BDAFDF_2_32 with 1024 parameters: 0.12037206292152405 +/- 0.018722199850772888
+BDAFDF_2_16 with 2048 parameters: 0.11587211787700653 +/- 0.015543080093654097
+BDAFDF_2_8 with 4096 parameters: 0.109239000082016 +/- 0.012357150491106935
+```
+
+Tried various different settings. Wasn't able to get anything that appeared
+to work well. I suppose the main problem is, I'm not sure this is a good
+way to measure how useful the approximation used in each of these cases
+will be in a deep network. Which makes it difficult to say whether the
+design of this experiment is good or bad; and trying to figure it out by
+tweaking the set up/optimiser is not likely to yield anything useful.
+
+We could ground this a little better in deep learning and work with a toy
+problem, such as MNIST; fitting a model composed using each of the
+approximation layers. Then, we could compare them based just on
+cross-entropy loss. However, we'd have the same problem of convergence if
+we were to use stochastic gradient descent, but a better optimiser may get
+trapped in local minima.
+
+Logistic regression is convex, so we don't have to worry about that. And,
+if we use a subset of MNIST, it should optimise relatively quickly.
+Unfortunately, there is another concern: most of these methods are only
+defined on square matrices, and mapping from the 784 dimensions of MNIST's
+input image to the 10 classes is a problem.
+
+

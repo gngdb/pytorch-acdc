@@ -20,7 +20,7 @@ from obj import PyTorchObjective
 from tqdm import tqdm
 
 n_replicates = 10
-M, N = 32, 100
+M, N = 512, 10000
 
 def sample_experiment(M, N):
     # whatever this initialises to is our "true" W
@@ -40,13 +40,16 @@ def sample_experiment(M, N):
     return X,Y
 
 def run_experiment(X,Y,objective):
+    # use the gpu
+    objective = objective.cuda()
+    objective.X, objective.Y = X.cuda(), Y.cuda()
     maxiter = 1000
     # try to optimize that function with scipy
     obj = PyTorchObjective(objective)
     # got more reliable results with CG than BFGS
-    #xL = optimize.minimize(obj.fun, obj.x0, method='BFGS', jac=obj.jac,
-    #        callback=verbose, options={'gtol': 1e-6, 'maxiter':maxiter})
-    xL = optimize.minimize(obj.fun, obj.x0, method='CG', jac=obj.jac, options={'maxiter':maxiter})
+    xL = optimize.minimize(obj.fun, obj.x0, method='CG', jac=obj.jac, options={'maxiter':maxiter, 'gtol':1e-3})
+    #xL = optimize.minimize(obj.fun, obj.x0, method='BFGS', jac=obj.jac, options={'maxiter':maxiter})
+    assert xL.success
     return xL.fun
 
 def count_params(module):
@@ -68,160 +71,157 @@ if __name__ == '__main__':
     #   Key: string "<layer_type>_<options>"
     #   Value: [(M, N, no. parameters, final MSE), ...]
     # list contains replicates
+    
+    try:
+        with tqdm(total=6*n_replicates) as pbar:
+            # ACDC experiments
+            for i in range(6):
+                n_layers = 2**i
+                exp_str = 'ACDC_%i'%n_layers
+                pbar.set_description(exp_str)
+                if exp_str not in results.keys():
+                    results[exp_str] = []
+                # make module executing the experiment
+                class Objective(nn.Module):
+                    def __init__(self, X, Y):
+                        super(Objective, self).__init__()
+                        # M layers
+                        self.acdc = StackedLinearACDC(M,M,n_layers)
+                        #self.acdc = nn.Linear(M,M)
+                        self.acdc = self.acdc.train()
+                        self.X, self.Y = X, Y
+                    def forward(self):
+                        output = self.acdc(self.X)
+                        return F.mse_loss(output, self.Y).mean()
 
-    with tqdm(total=6*n_replicates) as pbar:
-        # ACDC experiments
-        #for i in range(6):
-        for i in []:
-            n_layers = 2**i
-            exp_str = 'ACDC_%i'%n_layers
-            pbar.set_description(exp_str)
-            if exp_str not in results.keys():
-                results[exp_str] = []
-            # make module executing the experiment
-            class Objective(nn.Module):
-                def __init__(self, X, Y):
-                    super(Objective, self).__init__()
-                    # M layers
-                    self.acdc = StackedLinearACDC(M,M,n_layers)
-                    #self.acdc = nn.Linear(M,M)
-                    self.acdc = self.acdc.train()
-                    self.X, self.Y = X, Y
-                def forward(self):
-                    output = self.acdc(self.X)
-                    return F.mse_loss(output, self.Y).mean()
+                # run experiment n_replicates times
+                for n in range(n_replicates):
+                    X,Y = sample_experiment(M, N)
+                    objective = Objective(X, Y)
+                    mse = run_experiment(X,Y,objective) 
+                    results[exp_str] += [(M, N, count_params(objective), mse)]
+                    pbar.update(1)
 
-            # run experiment n_replicates times
-            for n in range(n_replicates):
-                X,Y = sample_experiment(M, N)
-                objective = Objective(X, Y)
-                mse = run_experiment(X,Y,objective) 
-                results[exp_str] += [(M, N, count_params(objective), mse)]
-                pbar.update(1)
+        plan = list(product([int(2**i) for i in range(4)],
+                            [int(M//(2**i)) for i in range(4)]))
+        with tqdm(total=len(plan)*n_replicates) as pbar:
+            # ShuffleNet experiments
+            for n_layers, n_groups in plan:
+            #for i in []:
+                exp_str = 'ShuffleNet_%i_%i'%(n_layers, n_groups)
+                pbar.set_description(exp_str)
+                if exp_str not in results.keys():
+                    results[exp_str] = []
+                # make module executing the experiment
+                class Objective(nn.Module):
+                    def __init__(self, X, Y):
+                        super(Objective, self).__init__()
+                        # M layers
+                        self.linapprox = ShuffleNetLinear(M,M,n_layers,n_groups)
+                        self.linapprox = self.linapprox.train()
+                        self.X, self.Y = X, Y
+                    def forward(self):
+                        output = self.linapprox(self.X)
+                        return F.mse_loss(output, self.Y).mean()
 
-    #plan = list(product([int(2**i) for i in range(2)],
-    #                    [int(2**i) for i in range(1,5)]))
-    plan = []
-    with tqdm(total=len(plan)*n_replicates) as pbar:
-        # ShuffleNet experiments
-        for n_layers, n_groups in plan:
-        #for i in []:
-            exp_str = 'ShuffleNet_%i_%i'%(n_layers, n_groups)
-            pbar.set_description(exp_str)
-            if exp_str not in results.keys():
-                results[exp_str] = []
-            # make module executing the experiment
-            class Objective(nn.Module):
-                def __init__(self, X, Y):
-                    super(Objective, self).__init__()
-                    # M layers
-                    self.linapprox = ShuffleNetLinear(M,M,n_layers,n_groups)
-                    self.linapprox = self.linapprox.train()
-                    self.X, self.Y = X, Y
-                def forward(self):
-                    output = self.linapprox(self.X)
-                    return F.mse_loss(output, self.Y).mean()
+                # run experiment n_replicates times
+                for n in range(n_replicates):
+                    X,Y = sample_experiment(M, N)
+                    objective = Objective(X, Y)
+                    mse = run_experiment(X,Y,objective) 
+                    results[exp_str] += [(M, N, count_params(objective), mse)]
+                    pbar.update(1)
 
-            # run experiment n_replicates times
-            for n in range(n_replicates):
-                X,Y = sample_experiment(M, N)
-                objective = Objective(X, Y)
-                mse = run_experiment(X,Y,objective) 
-                results[exp_str] += [(M, N, count_params(objective), mse)]
-                pbar.update(1)
+        with tqdm(total=6*n_replicates) as pbar:
+            # AFDF experiments
+            for i in range(6):
+            #for i in []:
+                n_layers = 2**i
+                exp_str = 'AFDF_%i'%n_layers
+                pbar.set_description(exp_str)
+                if exp_str not in results.keys():
+                    results[exp_str] = []
+                # make module executing the experiment
+                class Objective(nn.Module):
+                    def __init__(self, X, Y):
+                        super(Objective, self).__init__()
+                        self.afdf = StackedAFDF(M,M,n_layers)
+                        self.afdf = self.afdf.train()
+                        self.X, self.Y = X, Y
+                    def forward(self):
+                        output = self.afdf(self.X)
+                        return F.mse_loss(output, self.Y).mean()
 
-    with tqdm(total=6*n_replicates) as pbar:
-        # AFDF experiments
-        #for i in range(6):
-        for i in []:
-            n_layers = 2**i
-            exp_str = 'AFDF_%i'%n_layers
-            pbar.set_description(exp_str)
-            if exp_str not in results.keys():
-                results[exp_str] = []
-            # make module executing the experiment
-            class Objective(nn.Module):
-                def __init__(self, X, Y):
-                    super(Objective, self).__init__()
-                    self.afdf = StackedAFDF(M,M,n_layers)
-                    self.afdf = self.afdf.train()
-                    self.X, self.Y = X, Y
-                def forward(self):
-                    output = self.afdf(self.X)
-                    return F.mse_loss(output, self.Y).mean()
+                # run experiment n_replicates times
+                for n in range(n_replicates):
+                    X,Y = sample_experiment(M, N)
+                    objective = Objective(X, Y)
+                    mse = run_experiment(X,Y,objective) 
+                    results[exp_str] += [(M, N, count_params(objective), mse)]
+                    pbar.update(1)
 
-            # run experiment n_replicates times
-            for n in range(n_replicates):
-                X,Y = sample_experiment(M, N)
-                objective = Objective(X, Y)
-                mse = run_experiment(X,Y,objective) 
-                results[exp_str] += [(M, N, count_params(objective), mse)]
-                pbar.update(1)
+        plan = list(product([int(2**i) for i in range(2)],
+                            [int(M//(2**i)) for i in range(4)]))
+        with tqdm(total=len(plan)*n_replicates) as pbar:
+            # Block diagonal AFDF experiments 
+            for n_layers, n_groups in plan:
+            #for i in []:
+                exp_str = 'BDACDC_%i_%i'%(n_layers, n_groups)
+                pbar.set_description(exp_str)
+                if exp_str not in results.keys():
+                    results[exp_str] = []
+                # make module executing the experiment
+                class Objective(nn.Module):
+                    def __init__(self, X, Y):
+                        super(Objective, self).__init__()
+                        # M layers
+                        self.linapprox = GroupedStackedACDC(M,M,n_layers,n_groups)
+                        self.linapprox = self.linapprox.train()
+                        self.X, self.Y = X, Y
+                    def forward(self):
+                        output = self.linapprox(self.X)
+                        return F.mse_loss(output, self.Y).mean()
 
-    #plan = list(product([int(2**i) for i in range(2)],
-    #                    [int(M//(2**i)) for i in range(2)]))
-    plan = []
-    with tqdm(total=len(plan)*n_replicates) as pbar:
-        # Block diagonal AFDF experiments 
-        for n_layers, n_groups in plan:
-        #for i in []:
-            exp_str = 'BDACDC_%i_%i'%(n_layers, n_groups)
-            pbar.set_description(exp_str)
-            if exp_str not in results.keys():
-                results[exp_str] = []
-            # make module executing the experiment
-            class Objective(nn.Module):
-                def __init__(self, X, Y):
-                    super(Objective, self).__init__()
-                    # M layers
-                    self.linapprox = GroupedStackedACDC(M,M,n_layers,n_groups)
-                    self.linapprox = self.linapprox.train()
-                    self.X, self.Y = X, Y
-                def forward(self):
-                    output = self.linapprox(self.X)
-                    return F.mse_loss(output, self.Y).mean()
-
-            # run experiment n_replicates times
-            for n in range(n_replicates):
-                X,Y = sample_experiment(M, N)
-                objective = Objective(X, Y)
-                mse = run_experiment(X,Y,objective) 
-                results[exp_str] += [(M, N, count_params(objective), mse)]
-                pbar.update(1)
+                # run experiment n_replicates times
+                for n in range(n_replicates):
+                    X,Y = sample_experiment(M, N)
+                    objective = Objective(X, Y)
+                    mse = run_experiment(X,Y,objective) 
+                    results[exp_str] += [(M, N, count_params(objective), mse)]
+                    pbar.update(1)
 
 
-    plan = list(product([int(2**i) for i in range(2)],
-                        [int(M//(2**i)) for i in range(2)]))
-    with tqdm(total=len(plan)*n_replicates) as pbar:
-        # Block diagonal AFDF experiments
-        for n_layers, n_groups in plan:
-        #for i in []:
-            exp_str = 'BDAFDF_%i_%i'%(n_layers, n_groups)
-            pbar.set_description(exp_str)
-            if exp_str not in results.keys():
-                results[exp_str] = []
-            # make module executing the experiment
-            class Objective(nn.Module):
-                def __init__(self, X, Y):
-                    super(Objective, self).__init__()
-                    # M layers
-                    self.linapprox = GroupedStackedAFDF(M,M,n_layers,n_groups)
-                    self.linapprox = self.linapprox.train()
-                    self.X, self.Y = X, Y
-                def forward(self):
-                    output = self.linapprox(self.X)
-                    return F.mse_loss(output, self.Y).mean()
+        plan = list(product([int(2**i) for i in range(2)],
+                            [int(M//(2**i)) for i in range(4)]))
+        with tqdm(total=len(plan)*n_replicates) as pbar:
+            # Block diagonal AFDF experiments
+            for n_layers, n_groups in plan:
+            #for i in []:
+                exp_str = 'BDAFDF_%i_%i'%(n_layers, n_groups)
+                pbar.set_description(exp_str)
+                if exp_str not in results.keys():
+                    results[exp_str] = []
+                # make module executing the experiment
+                class Objective(nn.Module):
+                    def __init__(self, X, Y):
+                        super(Objective, self).__init__()
+                        # M layers
+                        self.linapprox = GroupedStackedAFDF(M,M,n_layers,n_groups)
+                        self.linapprox = self.linapprox.train()
+                        self.X, self.Y = X, Y
+                    def forward(self):
+                        output = self.linapprox(self.X)
+                        return F.mse_loss(output, self.Y).mean()
 
-            # run experiment n_replicates times
-            for n in range(n_replicates):
-                X,Y = sample_experiment(M, N)
-                objective = Objective(X, Y)
-                objective = objective.cuda()
-                objective.X, objective.Y = X.cuda(), Y.cuda()
-                mse = run_experiment(X,Y,objective) 
-                results[exp_str] += [(M, N, count_params(objective), mse)]
-                pbar.update(1)
-
+                # run experiment n_replicates times
+                for n in range(n_replicates):
+                    X,Y = sample_experiment(M, N)
+                    objective = Objective(X, Y)
+                    mse = run_experiment(X,Y,objective) 
+                    results[exp_str] += [(M, N, count_params(objective), mse)]
+                    pbar.update(1)
+    except KeyboardInterrupt:
+        pass
 
     # write results to file
     with open(results_file, 'w') as f:

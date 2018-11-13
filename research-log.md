@@ -810,4 +810,60 @@ Unfortunately, there is another concern: most of these methods are only
 defined on square matrices, and mapping from the 784 dimensions of MNIST's
 input image to the 10 classes is a problem.
 
+12th November 2018
+==================
+
+Unsure how to proceed. What we need is to run an experiment with a
+reasonable number of parameters (experiments on CIFAR-10 used too few
+parameters). But, it's not clear what the right way to run that experiment
+might be. I had hoped to get a metric on which type of structured efficient
+layer would be best to subsitute into a network, then I could just
+substitute it in. So far these metrics haven't worked out very well.
+
+Maybe that's the wrong way to approach this. This work is supposed to focus
+on the ACDC structured efficient linear layer, so we should just focus on
+designing a network that uses these layers and still achieves good
+performance.
+
+One step we could take immediately would be to use a teacher network that
+already incorporates grouped convolutions. That way, we don't lose
+parameters twice: once with the move to separable convolutions and again in
+the move from full to ACDC convolutions.
+
+A good candidate for this would be MobileNet, as it's already an efficient
+network, so making it more efficient would be impressive, and it's tunable,
+so we can actively compare to itself at different tuned sizes.
+
+To run this experiment we just need to incorporate MobileNet into the
+moonshine code, test it and allow substitution of convolutional blocks.
+
+At that point, it may be worth comparing the performance of block-diagonal
+and original ACDC parameterisations.
+
+Step 1 is checking what the parameter cost will be of the transformed
+MobileNet, and training a standard MobileNet to use as a teacher network.
+
+13th November 2018
+==================
+
+MobileNetv2 has some annoying channel dimensions, so my simple channel
+collapsing hacks to work with that won't work. This means that I can't
+replace as many of the 1x1 convolutions in that network as I can in the
+original MobileNet. It seems like comparing to the original MobileNet would
+be more worthwhile:
+
+```
+MobileNetv2     FLOPS           params
+  Original:     9.11550E+07     2.29692E+06
+  ACDC:         8.21483E+07     1.15126E+06
+MobileNet       FLOPS           params
+  Original:     4.63544E+07     3.21723E+06
+  ACDC:         1.13910E+07     8.95460E+04
+```
+
+Unfortunately, the original MobileNet paper didn't report performance on
+CIFAR-10, or CIFAR-100, so we'll have to start by training MobileNets in
+different sizes. Then we can tune the ACDC to have the same size as
+different MobileNets, and try to outperform them.
+
 

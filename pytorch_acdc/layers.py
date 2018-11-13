@@ -453,7 +453,7 @@ class FastStackedConvACDC(nn.Conv2d):
         _ = layers.pop(-1)
         self.layers = nn.Sequential(*layers)
         if out_channels < in_channels:
-            self.collapse = ChannelCollapse(in_channels, out_channels)
+            self.collapse = ChannelContract(in_channels, out_channels)
         else:
             self.collapse = lambda x: x
 

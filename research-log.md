@@ -866,4 +866,5 @@ CIFAR-10, or CIFAR-100, so we'll have to start by training MobileNets in
 different sizes. Then we can tune the ACDC to have the same size as
 different MobileNets, and try to outperform them.
 
-
+One positive side to this is that the experiment will be easier to port to
+ImageNet: plenty of ImageNet experiments using MobileNet are available.

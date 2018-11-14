@@ -868,3 +868,93 @@ different MobileNets, and try to outperform them.
 
 One positive side to this is that the experiment will be easier to port to
 ImageNet: plenty of ImageNet experiments using MobileNet are available.
+
+Trained a default sized MobileNet on CIFAR-10 and unfortunately was only
+able to get the following results:
+
+```
+Error@1 9.340 Error@5 0.460
+```
+
+In the original paper they only train on ImageNet, so I don't know whether
+to expect this to happen. The training loss is several times higher than
+the test loss, so there's a bit of overfitting happening.
+
+In the paper they mention that it's important to have very little weight
+decay on the depthwise filters. That seems like it's only going to
+exacerbate any problems we have with overfitting, but maybe we can increase
+the weight decay on other parts of the network at the same time.
+
+Tried that and results were worse, final test error.
+
+```
+Error@1 10.110 Error@5 0.360
+```
+
+Similar trend with train and test loss diverging, so a little bit of
+overfitting happening.
+
+While looking into the potential to try and compress one of the
+architecture search architectures (DARTS), found a large mistake in the
+function to count FLOPS and parameters. Unfortunately, was only counting
+each stack of ACDC layers as if it were just one layer, meaning the number
+of parameters in each is underestimated. It was also underestimated in the
+paper submitted to the NIPS efficiency workshop, so it's probably a good
+thing it didn't get accepted:
+
+```
+Tiny ConvNet	FLOPS		params
+  Original:	1.83065E+07	8.96740E+04
+  ACDC:		4.60235E+06	1.10050E+04
+ResNet18	FLOPS		params
+  Original:	5.55423E+08	1.11740E+07
+  ACDC:		1.23381E+08	1.51178E+05
+WRN(40,2)	FLOPS		params
+  Original:	3.28304E+08	2.24355E+06
+  ACDC:		5.26963E+07	1.00202E+05
+MobileNetv2	FLOPS		params
+  Original:	9.11550E+07	2.29692E+06
+  ACDC:		2.65222E+08	1.31958E+06
+MobileNet	FLOPS		params
+  Original:	4.63544E+07	3.21723E+06
+  ACDC:		5.33176E+07	2.08586E+05
+```
+
+The paper reported `WRN(40,2)`'s parameters after switching to ACDC layers
+as 46K, but it appears to be 100K, while the number of Mult-Add ops was
+reported as 33.2M, but was really 52.7M.
+
+As for DARTS, there are some 1x1 convolutions which we could substitute
+with stacked ACDC layers, but the reduction in parameters is small. Also,
+the number of channels in them is smaller than in the WRN, so the
+logarithmic scaling in floating point operations doesn't help, and it takes
+as many FLOPS as using the naive convolution:
+
+```
+DARTS
+  Original:	5.38201E+08	3.34934E+06
+  ACDC:		5.38201E+08	1.95225E+06
+```
+
+The number for parameter count is approximately the same as the DARTS
+paper, so we're probably estimating correctly.
+
+A more promising compression strategy may be to start with a `WRN-28-10`.
+Our experiments have already focused on these, so the change we have to
+make to start working with them is relatively small. And, because they use
+very wide layers, the prospective gains from using a logarithmic scaling
+method are much larger. Looks like a network using ACDC layers would have
+half as many parameters as MobileNetv2, but use a few times more Mult-Adds:
+
+```
+WRN(28,10)	FLOPS		params
+  Original:	5.24564E+09	3.64792E+07
+  ACDC:		7.99262E+08	5.55498E+05
+```
+
+If that network was able to achieve a top 1 error lower than 5, it would be
+fairly hard to deny this is a way to approximate layers that can work.
+
+Started experiments using a WRN-28-10 teacher network that starts with a
+top 1 error of 3.2% on CIFAR-10. One learning without and one with the
+teacher, both using ACDC layers. Each takes around 12 hours.

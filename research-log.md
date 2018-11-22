@@ -958,3 +958,39 @@ fairly hard to deny this is a way to approximate layers that can work.
 Started experiments using a WRN-28-10 teacher network that starts with a
 top 1 error of 3.2% on CIFAR-10. One learning without and one with the
 teacher, both using ACDC layers. Each takes around 12 hours.
+
+15th November 2018
+==================
+
+The WRN-28-10 with ACDC layers converged to 5.9% error after 200 epochs.
+Weight decay was set to `8.8e-6`. Without a teacher network the same
+network converged to 8.5% error.
+
+From the learning curves, it looks like a problem with overfitting when
+setting the weight decay so low. The validation loss diverges after epoch
+60. So, I started two new experiments: one with weight decay set globally
+to 1e-5 and another with weight decay on the ACDC layers set to 8.8e-6 but
+for everything else the default 5e-4 is preserved.
+
+At the same time, as we'd not done experiments with WRN-28-10 in the
+moonshine paper, I ran a student network with a G8B2 convolution
+substitution and got a final top 1 error of 3.34%, which has the following
+resource requirements:
+
+```
+Mult-Adds: 7.57734E+08
+Params: 4.78511E+06
+```
+
+Which is actually relatively competitive with work like CondenseNet
+(CondenseNet-182 was around 4e6 parameters and had a top-1 error of approx
+3.75%). 
+
+22nd November 2018
+==================
+
+Ran a week ago, but the results weren't noted here after the experiment.
+
+When the weight decay for the ACDC layers and traditional layers are
+separated, as described above, the top-1 error converged to 5%. This is
+competitive with the smaller CondenseNets on CIFAR-10.

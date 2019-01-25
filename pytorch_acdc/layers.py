@@ -425,6 +425,11 @@ def acdc_kernelmat(A, D, dct, idct, riffle, device):
     return torch.matmul(riffle(AC), DC)
 
 def create_kernelmat_function(device, layers, permute):
+    # only keep the dct and idct from the first layer
+    dct, idct = layers[0].dct, layers[0].idct
+    for layer in layers[1:]:
+        del layer.dct
+        del layer.idct
     # args for function will be the differentiable parameters
     kmat_args = [param for layer in layers for param in [layer.A, layer.D]]
     def kernelmat(*args):
@@ -433,7 +438,7 @@ def create_kernelmat_function(device, layers, permute):
         # iterate and build component ACDC matrices
         acdcs = []
         for (A,D), layer in zip(params, layers):
-            acdcs.append(acdc_kernelmat(A, D, layer.dct, layer.idct,
+            acdcs.append(acdc_kernelmat(A, D, dct, idct,
                 layer.riffle, device))
         # riffle them all
         acdcs = [permute(ACDC) for ACDC in acdcs]

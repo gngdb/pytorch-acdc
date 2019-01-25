@@ -454,7 +454,7 @@ class FastStackedConvACDC(nn.Conv2d):
     hinder representational capacity."""
     def __init__(self, in_channels, out_channels, kernel_size, n_layers,
             stride=1, padding=0, dilation=1, groups=1, bias=True,
-            original=False, checkpoint=True):
+            original=False, checkpoint=False):
         self.n_layers = n_layers
         if kernel_size == 1:
             super(FastStackedConvACDC, self).__init__(in_channels,

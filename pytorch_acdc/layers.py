@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 import pytorch_acdc as dct
 
+from torch.utils.checkpoint import checkpoint
+
 class ACDC(nn.Module):
     """
     A structured efficient layer, consisting of four steps:
@@ -413,13 +415,41 @@ class ChannelExpand(nn.Module):
         return torch.cat([x,x_add],1)
 
 
+def acdc_kernelmat(A, D, dct, idct, riffle, device):
+    # check our stored DCT matrices are on the right device
+    if dct.device != device:
+        dct = dct.to(device)
+        idct = idct.to(device)
+    AC = A*dct
+    DC = D*idct
+    return torch.matmul(riffle(AC), DC)
+
+def create_kernelmat_function(device, layers, permute):
+    # args for function will be the differentiable parameters
+    kmat_args = [param for layer in layers for param in [layer.A, layer.D]]
+    def kernelmat(*args):
+        # pair args to match with layers
+        params = [(A,D) for A,D in zip(args[:-1:2], args[1::2])]
+        # iterate and build component ACDC matrices
+        acdcs = []
+        for (A,D), layer in zip(params, layers):
+            acdcs.append(acdc_kernelmat(A, D, layer.dct, layer.idct,
+                layer.riffle, device))
+        # riffle them all
+        acdcs = [permute(ACDC) for ACDC in acdcs]
+        # and combine them
+        return reduce(torch.matmul, acdcs)
+    return kernelmat, kmat_args
+
+
 class FastStackedConvACDC(nn.Conv2d):
     """A Stacked ACDC layer that just combines all of the weight marices of all
     of the layers in the stack before implementing the layer with a
     convolution. This means that there is no ReLUs in it, though, which may
     hinder representational capacity."""
-    def __init__(self, in_channels, out_channels, kernel_size, n_layers, stride=1,
-            padding=0, dilation=1, groups=1, bias=True, original=False):
+    def __init__(self, in_channels, out_channels, kernel_size, n_layers,
+            stride=1, padding=0, dilation=1, groups=1, bias=True,
+            original=False, checkpoint=True):
         self.n_layers = n_layers
         if kernel_size == 1:
             super(FastStackedConvACDC, self).__init__(in_channels,
@@ -456,6 +486,8 @@ class FastStackedConvACDC(nn.Conv2d):
             self.collapse = ChannelContract(in_channels, out_channels)
         else:
             self.collapse = lambda x: x
+        # for checkpointing
+        self.checkpoint = True
 
     def reset_parameters(self):
         del self.weight
@@ -468,12 +500,17 @@ class FastStackedConvACDC(nn.Conv2d):
             x = x.repeat(1, self.expansion, 1, 1)
         k = self.kernel_size[0]
         c = max(self.out_channels, self.in_channels)
-        # gather ACDC matrices from each layer
-        acdcs = [layer.acdc(x.device) for layer in self.layers]
-        # riffle them all
-        acdcs = [self.permute(ACDC) for ACDC in acdcs]
-        # and combine them
-        ACDC = reduce(torch.matmul, acdcs)
+        if not self.checkpoint:
+            # gather ACDC matrices from each layer
+            acdcs = [layer.acdc(x.device) for layer in self.layers]
+            # riffle them all
+            acdcs = [self.permute(ACDC) for ACDC in acdcs]
+            # and combine them
+            ACDC = reduce(torch.matmul, acdcs)
+        else:
+            if not hasattr(self, 'combining_function'):
+                self.combining_function, self.args = create_kernelmat_function(x.device, self.layers, self.permute)
+            ACDC = checkpoint(self.combining_function, *self.args)
         self.weight = kernel_matrix_to_weights(ACDC, c, c, k)
         return self.collapse(super(FastStackedConvACDC, self).forward(x))
 
@@ -489,7 +526,6 @@ if __name__ == '__main__':
     _ = conv_acdc(x)
     param_names = [n for n,p in conv_acdc.named_parameters()]
     assert 'weight' not in param_names, param_names
-    assert False
 
     x = torch.Tensor(128,200)
     x.normal_(0,1)
